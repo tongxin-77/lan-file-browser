@@ -122,12 +122,8 @@ class LfbClient {
       mediaUrl('/api/file', {'share': share, 'path': path});
 
   /// 缩略图 URL（`?t=` 白名单接口）；[width] 为 160/320/640。
-  Uri thumbUrl(String share, String path, int width) => _uri('/api/thumb', {
-    'share': share,
-    'path': path,
-    'w': '$width',
-    't': ?token,
-  });
+  Uri thumbUrl(String share, String path, int width) =>
+      mediaUrl('/api/thumb', {'share': share, 'path': path, 'w': '$width'});
 
   /// `GET /api/next`：下一集，无则 null（03 §4.6）。
   Future<PathItem?> next(String share, String path) async {
@@ -203,6 +199,8 @@ class LfbClient {
       _uri('/api/file', {'share': share, 'path': path}),
     );
     if (token != null) req.headers['Authorization'] = 'Bearer $token';
+    final v = vault;
+    if (v != null) req.headers['X-Vault'] = v.session;
     req.headers['Range'] = 'bytes=0-${bytes - 1}';
     try {
       final res = await _http.send(req).timeout(timeout);
@@ -284,11 +282,13 @@ class LfbClient {
 
   void close() => _http.close();
 
-  /// 需直链的媒体 URL：附 `?t=`；已解锁时仅对 file/download/thumb 附 `?v=`（04 §5）。
+  /// 需直链的媒体 URL：附 `?t=`；仅对已解锁片库内的 file/download/thumb 附 `?v=`（04 §5），
+  /// 普通共享的直链不带会话。
   Uri mediaUrl(String apiPath, Map<String, String> query) => _uri(apiPath, {
     ...query,
     't': ?token,
-    if (vaultUrlPaths.contains(apiPath)) 'v': ?vault?.session,
+    if (vaultUrlPaths.contains(apiPath) && isVaultShare(query['share']))
+      'v': ?vault?.session,
   });
 
   /// 允许 `?v=` 的接口（与服务端白名单一致，不含 APK 下载）。

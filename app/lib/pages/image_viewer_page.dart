@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
@@ -7,7 +6,6 @@ import '../api/lfb_client.dart';
 import '../models/file_item.dart';
 import '../models/share.dart';
 import '../services/image_saver.dart';
-import '../services/thumbs.dart';
 import '../theme.dart';
 import '../widgets/file_tile.dart';
 import '../widgets/thumb.dart';
@@ -57,10 +55,7 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
     final url = widget.client.fileUrl(widget.share.id, _pathOf(f));
     // 大图限制解码尺寸，避免 4000 万像素照片占满内存
     return ResizeImage(
-      CachedNetworkImageProvider(
-        url.toString(),
-        cacheKey: imageCacheKey(url, f.mtime),
-      ),
+      serverImageProvider(widget.client, widget.share.id, url, f.mtime),
       width: 2560,
       height: 2560,
       policy: ResizeImagePolicy.fit,

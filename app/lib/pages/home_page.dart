@@ -32,6 +32,7 @@ class _HomePageState extends State<HomePage> {
   String? _error;
   bool _connected = true;
   List<ContinueItem> _continue = const [];
+  Set<String> _vaultIds = const {};
 
   @override
   void initState() {
@@ -42,8 +43,11 @@ class _HomePageState extends State<HomePage> {
 
   /// 继续观看（03 §4.8）；失败不影响首页，保留旧列表。
   Future<void> _loadContinue() async {
+    final unlocked = vaultController.unlocked;
     try {
       final items = await widget.client.continueWatching();
+      // 请求期间上锁/解锁：丢弃结果，避免把片库条目放回列表
+      if (unlocked != vaultController.unlocked) return;
       if (mounted) setState(() => _continue = items);
     } on LfbException {
       // 忽略
@@ -74,8 +78,21 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
+  /// 解锁时记下片库 id 并刷新继续观看（合并片库条目）；上锁时立即移除这些条目（04 §8）。
   void _onVault() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (vaultController.unlocked) {
+      _vaultIds = {for (final s in vaultController.shares) s.id};
+    } else {
+      final gone = _vaultIds;
+      _vaultIds = const {};
+      _continue = [
+        for (final c in _continue)
+          if (!gone.contains(c.share)) c,
+      ];
+    }
+    setState(() {});
+    _loadContinue();
   }
 
   /// 长按电脑名称约 0.6 秒：输入密码（04 §4；按下时不给任何反馈）。
