@@ -17,6 +17,17 @@ func TestClassify(t *testing.T) {
 	}{
 		{"IMG_20250101_120000.jpg", true, CatPhoto, "照片/2023/12/IMG_20250101_120000.jpg"},
 		{"a/pic.png", false, CatPhoto, "照片/2024/03/pic.png"},
+		// 无 EXIF：先取文件名中的合法日期，取不到再用修改时间
+		{"IMG_20250314_101010.jpg", false, CatPhoto, "照片/2025/03/IMG_20250314_101010.jpg"},
+		{"PXL_20220705_123456789.jpg", false, CatPhoto, "照片/2022/07/PXL_20220705_123456789.jpg"},
+		{"Screenshot_2025-03-14-10-10-10.png", false, CatPhoto, "照片/2025/03/Screenshot_2025-03-14-10-10-10.png"},
+		{"Screenshot_20250314-101010_微信.png", false, CatPhoto, "照片/2025/03/Screenshot_20250314-101010_微信.png"},
+		{"IMG-20230110-WA0001.jpeg", false, CatPhoto, "照片/2023/01/IMG-20230110-WA0001.jpeg"},
+		{"mmexport_2021_11_02.jpg", false, CatPhoto, "照片/2021/11/mmexport_2021_11_02.jpg"},
+		{"IMG_20251340_101010.jpg", false, CatPhoto, "照片/2024/03/IMG_20251340_101010.jpg"}, // 13 月非法
+		{"IMG_20250230.jpg", false, CatPhoto, "照片/2024/03/IMG_20250230.jpg"},               // 2 月 30 日非法
+		{"DSC120250314.jpg", false, CatPhoto, "照片/2024/03/DSC120250314.jpg"},               // 数字串中间不算日期
+		{"IMG_1234.jpg", false, CatPhoto, "照片/2024/03/IMG_1234.jpg"},
 		{"VID_20250102_101010.mp4", false, CatPhoto, "照片/2025/01/VID_20250102_101010.mp4"},
 		{"PXL_20240705_000000.mp4", false, CatPhoto, "照片/2024/07/PXL_20240705_000000.mp4"},
 		{"IMG_1234.MOV", false, CatPhoto, "照片/2024/03/IMG_1234.MOV"},
