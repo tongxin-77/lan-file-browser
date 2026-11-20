@@ -189,3 +189,52 @@ func TestMediaErrors(t *testing.T) {
 		}
 	}
 }
+
+// writeFiles 在 root 下创建文件（内容为相对路径）。
+func writeFiles(t *testing.T, root string, files ...string) {
+	t.Helper()
+	for _, rel := range files {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// 同目录混放多部剧时只在同名剧集中找下一集；其他视频都无集号时回退自然排序。
+func TestNextSameShowAndFallback(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root,
+		"混/Alpha.S01E01.mkv",
+		"混/Alpha.S01E02.mkv",
+		"混/Beta.S01E03.mkv",
+		"混/ALPHA.S01E05.mkv", // 剧名大小写不同仍算同一部
+		"混/Beta.S01E01.mkv",
+		"单/Show.E01.mkv",
+		"单/trailer.mkv",
+		"单/notes.txt",
+		"末/Show.E01.mkv",
+		"末/Other.E02.mkv",
+	)
+	s := &Server{Config: config.NewStore(&config.Config{Shares: []config.Share{{ID: "pub", Name: "公共", Path: root}}}),
+		Auth: TokenMap{"tok": "dev"}}
+	for _, c := range []struct{ path, want string }{
+		{"混/Alpha.S01E01.mkv", "混/Alpha.S01E02.mkv"},
+		{"混/Alpha.S01E02.mkv", "混/ALPHA.S01E05.mkv"}, // 不跳到 Beta.S01E03
+		{"混/ALPHA.S01E05.mkv", ""},
+		{"混/Beta.S01E01.mkv", "混/Beta.S01E03.mkv"},
+		{"单/Show.E01.mkv", "单/trailer.mkv"}, // 其他视频都无集号：自然排序
+		{"末/Show.E01.mkv", ""},              // 其他视频有集号但不是同一部剧
+	} {
+		got := ""
+		if nr := getNext(t, s, "tok", "pub", c.path); nr.Item != nil {
+			got = nr.Item.Path
+		}
+		if got != c.want {
+			t.Errorf("next %s = %q, want %q", c.path, got, c.want)
+		}
+	}
+}
