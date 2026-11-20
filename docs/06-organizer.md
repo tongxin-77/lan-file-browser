@@ -160,7 +160,7 @@ SQLite 表 `organize_items`（同 03 的 `data.db`）：
 | `kind` / `category` | `video` `image` `subtitle` / `photo` `episode` `movie` `unsorted` |
 | `target_path` | 库目录内相对路径（最终名） |
 | `state` | `queued` `copying` `done` `duplicate` `failed` |
-| `source_action` | `kept`（复制）`recycled` `renamed` `recycle_failed` |
+| `source_action` | `kept`（复制）`recycled` `deleted`（`afterMove: delete`）`renamed` `recycle_failed` |
 | `attempts` / `error` | 失败次数 / 最近一次错误（可读文字） |
 | `created_at` / `updated_at` / `done_at` | 时间 |
 
@@ -183,7 +183,7 @@ SQLite 表 `organize_items`（同 03 的 `data.db`）：
 | 3 复制 | 1 MiB 分块读写，每块之间检查限速、播放暂停、手动暂停（第 8 节）；写完 `Sync` |
 | 4 校验 | 临时文件大小、快速指纹与入队记录一致；且源文件大小、mtime 未变（复制期间被改动 → 丢弃临时文件，回到观察中） |
 | 5 落盘 | 设置临时文件修改时间为源文件原 mtime；选定最终名（重名规则 5.3，按目录加锁）后 `root.Rename` 原子重命名 |
-| 6 源处理 | 复制模式：不动源文件，不影响做种。移动模式：按 `afterMove` 处理——`recycle`：按 03 §4.10 移入回收站，源盘无回收站时**保留源文件**，记 `recycle_failed` 并提示，不自动改为永久删除；`delete`：校验通过后直接永久删除源文件 |
+| 6 源处理 | 复制模式：不动源文件，不影响做种。移动模式：按 `afterMove` 处理——`recycle`：移入回收站（`SHFileOperationW` + `FOF_ALLOWUNDO`；事先确认源盘为固定磁盘、未设“不移到回收站”且文件不超过回收站容量，否则视为无回收站），源盘无回收站时**保留源文件**，记 `recycle_failed` 并提示，不自动改为永久删除；`delete`：校验通过后直接永久删除源文件 |
 | 同分区移动 | 跳过 2–5，直接 `MoveFileEx` 重命名到最终名（瞬间完成、原子，mtime 自然保留） |
 | 失败 | 删除临时文件，`attempts+1`，记录 `error`；下次扫描重试，达到 `maxRetries` 后停止，等待管理页“重试” |
 
@@ -205,7 +205,7 @@ SQLite 表 `organize_items`（同 03 的 `data.db`）：
 | 规则 | 设计 |
 | ---- | ---- |
 | 仅本机设置 | 开启整理、源文件夹路径、模式只能在本机管理页设置（接口仅 127.0.0.1，第 11 节）；App 无任何整理接口 |
-| 防循环整理 | 保存时校验（真实路径规范化后、大小写不敏感、按分隔符边界比较）：库目录不能是任何源文件夹的子目录，源文件夹也不能是库目录的子目录或相同目录；**跨片库同样校验**（A 片库的库目录不能位于 B 片库的源文件夹内） |
+| 防循环整理 | 保存时校验（真实路径规范化后、大小写不敏感、按分隔符边界比较）：库目录不能是任何源文件夹的子目录，源文件夹也不能是库目录的子目录或相同目录；**跨片库同样校验**（A 片库的库目录不能位于 B 片库的源文件夹内；只涉及配置了源文件夹的片库，普通共享不参与） |
 | 源文件夹互斥 | 同一源文件夹（或其子目录）不能同时被两个片库/两个源配置，避免一个文件被整理两次 |
 | 不跟随链接 | 遍历源文件夹时遇到符号链接、目录联接（重解析点）一律跳过，不跟随 |
 | 写入范围 | 目标只写在库目录 `os.Root` 内；目标名经 5.2 清洗 |
@@ -230,7 +230,7 @@ SQLite 表 `organize_items`（同 03 的 `data.db`）：
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
-| GET | `/api/admin/shares/{id}/organize` | 返回 `organize` 配置 + 状态 |
+| GET | `/api/admin/shares/{id}/organize` | 返回 `{organize, defaults, sources: [{id, sameDisk, sameVolume}], status}`（配置、全局默认值、各源的同盘提醒、状态）；PUT 与暂停/继续返回同样内容 |
 | PUT | `/api/admin/shares/{id}/organize` | 整体保存配置（第 3 节字段）；按第 9 节校验，失败 `400 BAD_PATH` / `409 CONFLICT`（与其他片库源文件夹重叠） |
 | POST | `/api/admin/shares/{id}/organize/scan` | 立即扫描，`202` |
 | POST | `/api/admin/shares/{id}/organize/dry-run` | 试运行，返回 `items[]` |
@@ -246,7 +246,7 @@ SQLite 表 `organize_items`（同 03 的 `data.db`）：
 | `state` | `idle` `scanning` `copying` `paused` `offline` |
 | `pauseReason` | `manual` `lowSpace` `playback` |
 | `lastScanAt` / `nextScanAt` | RFC 3339 |
-| `counts` | `{done, duplicate, queued, watching, failed}`，另按 `sources[].id` 分组 |
+| `counts` | `{done, duplicate, queued, watching, failed}`；`bySource` 按 `sources[].id` 分组（不含 `watching`） |
 | `current` | `{name, bytes, total, speed}` 或 `null` |
 | `freeBytes` / `minFreeBytes` | 库盘剩余 / 需保留 |
 
