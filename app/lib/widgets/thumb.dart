@@ -5,7 +5,21 @@ import '../api/lfb_client.dart';
 import '../services/thumbs.dart';
 import '../theme.dart';
 
-/// 服务端缩略图（内存 + 磁盘缓存；缓存键去掉 token）。加载中/失败显示 [placeholder]。
+/// 服务端图片的 [ImageProvider]：加密片库只进内存 imageCache（上锁时清空），
+/// 不写 cached_network_image 的磁盘缓存（04 §8）；其他共享内存 + 磁盘缓存，缓存键去掉 token。
+ImageProvider serverImageProvider(
+  LfbClient client,
+  String share,
+  Uri url,
+  DateTime mtime,
+) => client.isVaultShare(share)
+    ? NetworkImage(url.toString())
+    : CachedNetworkImageProvider(
+        url.toString(),
+        cacheKey: imageCacheKey(url, mtime),
+      );
+
+/// 服务端缩略图（加密片库仅内存缓存，见 [serverImageProvider]）。加载中/失败显示 [placeholder]。
 class ServerThumb extends StatelessWidget {
   const ServerThumb({
     super.key,
@@ -36,6 +50,17 @@ class ServerThumb extends StatelessWidget {
           MediaQuery.devicePixelRatioOf(context),
         );
         final url = client.thumbUrl(share, path, w);
+        if (client.isVaultShare(share)) {
+          return Image(
+            image: serverImageProvider(client, share, url, mtime),
+            width: width,
+            height: height,
+            fit: BoxFit.cover,
+            frameBuilder: (_, child, frame, sync) =>
+                frame == null && !sync ? placeholder : child,
+            errorBuilder: (_, _, _) => placeholder,
+          );
+        }
         return CachedNetworkImage(
           imageUrl: url.toString(),
           cacheKey: imageCacheKey(url, mtime),
