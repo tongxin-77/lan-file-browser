@@ -1,10 +1,11 @@
-/// `GET /api/ping` 响应 `{id, name, version, needPair}`。
+/// `GET /api/ping` 响应 `{id, name, version, minAppVersion, needPair}`。
 class PingInfo {
   const PingInfo({
     required this.id,
     required this.name,
     required this.version,
     required this.needPair,
+    this.minAppVersion,
   });
 
   factory PingInfo.fromJson(Map<String, dynamic> j) => PingInfo(
@@ -12,12 +13,16 @@ class PingInfo {
     name: j['name'] as String? ?? '',
     version: j['version'] as String? ?? '',
     needPair: j['needPair'] as bool? ?? true,
+    minAppVersion: j['minAppVersion'] as String?,
   );
 
   final String id;
   final String name;
   final String version;
   final bool needPair;
+
+  /// 服务端要求的最低 App 版本（02 §5.3）；旧服务端无此字段。
+  final String? minAppVersion;
 }
 
 /// `POST /api/pair` 响应 `{token, serverId, name}`。
