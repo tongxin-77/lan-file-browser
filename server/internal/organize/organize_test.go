@@ -211,6 +211,15 @@ func TestOrganizeCopyFlow(t *testing.T) {
 			t.Errorf("%s: %s %s", it.SrcPath, it.State, it.SourceAction)
 		}
 	}
+	if items, _, _ := e.m.DryRun("sh"); len(items) != 4 {
+		t.Fatalf("试运行: %+v", items)
+	} else {
+		for _, it := range items {
+			if it.SrcPath != "dl.mkv" && it.Action != "done" {
+				t.Errorf("已整理（含字幕）应显示 done: %+v", it)
+			}
+		}
+	}
 	// .aria2 删除后（下载完成）再整理
 	os.Remove(filepath.Join(e.src, "dl.mkv.aria2"))
 	e.run()
