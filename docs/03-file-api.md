@@ -1,7 +1,7 @@
 # 03 · 文件浏览接口与路径安全
 
 > 范围：服务端对 App 提供的文件浏览、播放、下载、缩略图、下一集、字幕、观看进度、上传/重命名/删除接口，以及路径安全与权限校验。
-> 前置：鉴权（`Authorization: Bearer <token>`；`?t=<token>` 仅限 `/api/file`、`/api/download`，P2 实现 `/api/thumb` 时加入）、端口 8686 见 [01-connection.md](01-connection.md)；共享文件夹与权限由本机管理页配置，见 [desgin/brief.md](desgin/brief.md)。
+> 前置：鉴权（`Authorization: Bearer <token>`；`?t=<token>` 仅限 `/api/file`、`/api/download`、`/api/thumb`）、端口 8686 见 [01-connection.md](01-connection.md)；共享文件夹与权限由本机管理页配置，见 [desgin/brief.md](desgin/brief.md)。
 > 说明：本文接口取代 README 中的「初步 API」（`/api/roots`、`?path=` 等），以本文为准。
 
 ## 1. 虚拟路径模型
@@ -152,7 +152,7 @@ flowchart LR
 
 ### 4.5 GET /api/thumb
 
-参数：`share`、`path`、`w`（取整到 160/320/640）；允许 `?t=`。返回 JPEG，`Cache-Control: private, max-age=86400`。（实现时需把 `/api/thumb` 加入服务端 `?t=` 白名单。）
+参数：`share`、`path`、`w`（取整到 160/320/640）；允许 `?t=`。返回 JPEG，`Cache-Control: private, max-age=86400`。
 
 | 来源 | 生成方式 | `hasThumb` |
 | ---- | ---- | ---- |
