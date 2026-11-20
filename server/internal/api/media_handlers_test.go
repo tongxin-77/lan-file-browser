@@ -28,6 +28,9 @@ func newMediaServer(t *testing.T) *Server {
 		"剧/Show.S01E01.txt",
 		"剧/[字幕组] Show [01].cht.ass",
 		"剧/[字幕组] Show [02].ass",
+		"剧/Show.S01.chs.srt", // 季级字幕
+		"剧/Show.S02.srt",     // 季不同
+		"剧/Other.S01.srt",    // 剧名不同
 		"杂/alpha.mp4",
 		"杂/beta.mkv",
 		"杂/gamma.txt",
@@ -143,6 +146,7 @@ func TestSubtitles(t *testing.T) {
 		"exact|chs|srt|剧/Show.S01E01.chs.srt",
 		"exact|zh-CN|ass|剧/Show.S01E01.zh-CN.ass",
 		"episode|cht|ass|剧/[字幕组] Show [01].cht.ass",
+		"season|chs|srt|剧/Show.S01.chs.srt",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("subtitles = %q\nwant %q", got, want)

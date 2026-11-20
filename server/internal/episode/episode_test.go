@@ -95,3 +95,25 @@ func TestParseWithDir(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSeason(t *testing.T) {
+	cases := []struct {
+		name string
+		want Info
+		ok   bool
+	}{
+		{"Show.Name.S01.chs.srt", Info{Show: "Show Name", Season: 1}, true},
+		{"Show Name S02.ass", Info{Show: "Show Name", Season: 2}, true},
+		{"[字幕组] 剧名 第二季.简体.ass", Info{Show: "剧名", Season: 2}, true},
+		{"Show.Name.Season 3.srt", Info{Show: "Show Name", Season: 3}, true},
+		{"Show.Name.S01E02.chs.srt", Info{}, false}, // 有集号
+		{"Show.Name.chs.srt", Info{}, false},        // 无季号
+		{"S01.chs.srt", Info{}, false},              // 无剧名
+	}
+	for _, c := range cases {
+		got, ok := ParseSeason(c.name)
+		if got != c.want || ok != c.ok {
+			t.Errorf("ParseSeason(%q) = %+v, %v; want %+v, %v", c.name, got, ok, c.want, c.ok)
+		}
+	}
+}
