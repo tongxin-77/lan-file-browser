@@ -96,7 +96,7 @@
 | 场景 | 携带方式 |
 | ---- | ---- |
 | 普通 API | `Authorization: Bearer <token>` + `X-Vault: <session>` |
-| 视频/图片 URL | `?t=<token>&v=<session>`（日志同样脱敏 `v`）；`?v=` 与 `?t=` 白名单相同，只对 GET/HEAD 的 `/api/file`、`/api/download`、`/api/thumb` 生效 |
+| 视频/图片 URL | `?t=<token>&v=<session>`（日志同样脱敏 `v`）；`?v=` 只对 GET/HEAD 的 `/api/file`、`/api/download`、`/api/thumb` 生效（与 `?t=` 白名单相同，但不含 `/api/app/apk/{abi}`：APK 与片库无关） |
 
 无有效会话访问加密片库的任何 `shareId` → **404**，响应与“不存在”完全相同。
 

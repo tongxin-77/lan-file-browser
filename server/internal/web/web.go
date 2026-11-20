@@ -15,6 +15,7 @@ var files = map[string][2]string{
 	"/app.js":      {"app.js", "text/javascript; charset=utf-8"},
 	"/vault.js":    {"vault.js", "text/javascript; charset=utf-8"},    // 加密片库设置（04）
 	"/organize.js": {"organize.js", "text/javascript; charset=utf-8"}, // 自动整理（06）
+	"/update.js":   {"update.js", "text/javascript; charset=utf-8"},   // 更新横幅（02 §5）
 	"/style.css":   {"style.css", "text/css; charset=utf-8"},
 }
 

@@ -51,7 +51,7 @@ flutter build apk --release --split-per-abi
 
 - 面向设备的共享内文件访问一律走 `internal/fsx`（`fsx.Open` / `fsx.OpenFinal`，基于 `os.Root`），不得直接 `os.Open` 拼接路径。例外仅限本机管理页的文件夹选择器等 localOnly 接口。
 - 新增本机管理接口：读接口包 `localOnly`，修改类接口包 `s.adminWrite`（Host 校验 + `X-LFB-Admin` 头 + JSON + Origin 校验防 CSRF）。
-- `?t=` token 只对 GET/HEAD 的 `/api/file`、`/api/download`、`/api/thumb` 生效（`auth.Service.DeviceFromRequest`）；新增需要 URL 直链的接口必须显式加入白名单并补测试。
+- `?t=` token 只对 GET/HEAD 的 `/api/file`、`/api/download`、`/api/thumb`、`/api/app/apk/{abi}` 生效（`auth.Service.DeviceFromRequest`）；新增需要 URL 直链的接口必须显式加入白名单并补测试。
 - 不可见共享、无会话访问的加密片库、隐藏/系统项、链接逃逸：一律 `404 NOT_FOUND`，与“不存在”完全一致；`403` 仅用于“可见但无该操作权限”（03 §3、04）。
 - 错误 `message` 不含真实路径；日志必须对 `?t=`、`?v=` 脱敏，且不记录加密片库内文件名。
 - `TokenMap` 只用于测试，正式运行用 `auth.Service`。

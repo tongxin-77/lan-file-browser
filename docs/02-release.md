@@ -109,7 +109,9 @@ jobs:
 | ---- | ---- |
 | 检查时机 | 启动时 + 每 24h |
 | 检查地址 | `GET https://api.github.com/repos/<owner>/<repo>/releases/latest`，取 `tag_name` 与本地 `main.version` 比较（semver） |
-| 提示位置 | 本机管理网页 `http://localhost:8686/` 顶部横幅：新版本号、changelog、下载链接 |
+| 提示位置 | 本机管理网页 `http://localhost:8686/` 顶部横幅：新版本号、changelog（折叠）、“下载安装包”（新标签页打开）、“稍后提醒”（同一版本隐藏 1 天）；“当前版本”旁有“检查更新” |
+| 接口（仅本机） | `GET /api/admin/update` → `{current, latest, hasUpdate, notes, installerUrl, releaseUrl, checkedAt, failed, disabled}`（`disabled`：`dev` 开发版 / `config` 已关闭）；`POST /api/admin/update/check` 立即检查（CSRF 同其他修改类接口） |
+| 资产识别 | 安装包 `lfb-server-setup-*.exe`；APK `lfb-app-<abi>.apk`；`checksums.txt`（sha256sum 格式） |
 | 第一期 | **仅提示 + 手动下载**（用户下载新安装包覆盖安装，配置与数据保留） |
 | 后期：一键更新 | 下载 `setup.exe` → 校验 `checksums.txt` 中的 sha256 → 以 `/VERYSILENT /SUPPRESSMSGBOXES` 启动安装包 → 主进程退出 → Inno Setup 覆盖文件并在结束时重启服务端。有安装包后无需自写 updater |
 | 开发版 | `version == "dev"` 时不检查 |
@@ -118,7 +120,8 @@ jobs:
 
 | 项 | 设计 |
 | ---- | ---- |
-| 检查来源（优先） | 通过已连接服务端代理：`GET /api/app/latest`，返回 `{version, apks: {arm64-v8a: url, armeabi-v7a: url}, sha256, notes}`。手机无外网时，服务端可从本地缓存直接提供 APK |
+| 检查来源（优先） | 通过已连接服务端代理：`GET /api/app/latest`（需设备鉴权），返回 `{version, minAppVersion, notes, apks: {abi: url}, sha256: {abi: hash}}`；尚无版本信息时 404。`apks` 只列已缓存且校验通过的 ABI，url 指向本服务 `GET /api/app/apk/{abi}`（支持 Range，可用 `?t=`），为空时走兜底 |
+| APK 缓存 | 服务端检查到最新 Release（不论服务端自身是否需要更新）即把 APK 下载到 `<数据目录>\cache\apk\<版本>\`，按 `checksums.txt` 校验 sha256，失败删除、缺校验值不缓存；只保留最新一个版本。缓存状态在内存中，重启后需再次检查成功才提供 |
 | 检查来源（兜底） | 直接请求 GitHub latest release |
 | abi 选择 | 通过 `device_info_plus` 读取 `supportedAbis`，优先 `arm64-v8a` |
 | 下载与安装 | 下载 APK → 校验 sha256 → 调用系统安装器（`open_filex` 或 `ota_update` 包） |
@@ -130,8 +133,10 @@ jobs:
 `/api/ping` 扩展返回：
 
 ```json
-{ "name": "lfb-server", "version": "1.2.0", "minAppVersion": "1.1.0" }
+{ "id": "…", "name": "电脑名", "version": "1.2.0", "minAppVersion": "1.1.0", "needPair": false }
 ```
+
+`minAppVersion` 为服务端代码常量 `api.MinAppVersion`（初值 `0.0.0`）：仅当服务端接口发生旧版 App 无法兼容的变更（删除/改名字段、改语义）时提升到第一个兼容的 App 版本；新增字段不提升。
 
 | 情形 | 行为 |
 | ---- | ---- |
@@ -143,8 +148,8 @@ jobs:
 
 | 问题 | 方案 |
 | ---- | ---- |
-| GitHub API 未鉴权限 60 次/小时/IP | 服务端 24h 一次、App 优先走服务端代理，远低于上限；结果缓存 1h |
-| 国内访问 GitHub 慢 / 不通 | 配置项 `update.mirror`（如 GitHub 加速代理前缀或自建镜像），为空时直连；下载后必须校验 sha256 |
+| GitHub API 未鉴权限 60 次/小时/IP | 服务端启动时 + 24h 一次、App 优先走服务端代理，远低于上限；结果缓存 1h（管理页 / App 请求距上次检查超过 1h 才在后台重新检查，“检查更新”按钮除外）；请求带 `User-Agent: lfb-server` |
+| 国内访问 GitHub 慢 / 不通 | `config.json` 的 `update.mirror`：把资产下载地址中的 `https://github.com/` 替换为该前缀（加速代理填 `https://代理/https://github.com/`，自建镜像按 GitHub 路径布局），为空时直连；API 请求不走镜像；下载后必须校验 sha256。`update.enabled`（默认 `true`）为 `false` 时不检查 |
 | 检查失败 | 静默忽略，记录日志，不影响主功能 |
 
 ## 6. Windows 安装包（Inno Setup）
