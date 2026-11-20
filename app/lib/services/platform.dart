@@ -29,4 +29,41 @@ class PlatformService {
       return 'Android';
     }
   }
+
+  /// 窗口 FLAG_SECURE：最近任务缩略图空白、禁止截屏（04 §8）。
+  static Future<void> setSecure(bool on) async {
+    try {
+      await _channel.invokeMethod<void>('setSecure', on);
+    } on Exception {
+      // 忽略：非 Android
+    }
+  }
+
+  /// 是否已允许本 App“安装未知应用”（Android 8+ 需用户授予）。
+  static Future<bool> canInstallPackages() async {
+    try {
+      return await _channel.invokeMethod<bool>('canInstallPackages') ?? false;
+    } on Exception {
+      return false;
+    }
+  }
+
+  /// 打开本 App 的“安装未知应用”设置页。
+  static Future<void> openInstallSettings() async {
+    try {
+      await _channel.invokeMethod<void>('openInstallSettings');
+    } on Exception {
+      // 忽略
+    }
+  }
+
+  /// 经 FileProvider 调用系统安装器安装 [path]（须位于应用缓存目录 apk/ 下）。
+  static Future<bool> installApk(String path) async {
+    try {
+      await _channel.invokeMethod<void>('installApk', path);
+      return true;
+    } on Exception {
+      return false;
+    }
+  }
 }

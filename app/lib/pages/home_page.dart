@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../api/api_exception.dart';
@@ -10,6 +11,7 @@ import '../services/playback.dart';
 import '../theme.dart';
 import '../widgets/continue_tile.dart';
 import '../widgets/lamp_glow.dart';
+import '../widgets/password_sheet.dart';
 import '../widgets/thumb.dart';
 import 'browser_page.dart';
 import 'player_page.dart';
@@ -35,6 +37,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _load();
+    vaultController.addListener(_onVault);
   }
 
   /// 继续观看（03 §4.8）；失败不影响首页，保留旧列表。
@@ -64,6 +67,22 @@ class _HomePageState extends State<HomePage> {
         )
         .then((_) => _loadContinue());
   }
+
+  @override
+  void dispose() {
+    vaultController.removeListener(_onVault);
+    super.dispose();
+  }
+
+  void _onVault() {
+    if (mounted) setState(() {});
+  }
+
+  /// 长按电脑名称约 0.6 秒：输入密码（04 §4；按下时不给任何反馈）。
+  void _askPassword() => showPasswordSheet(
+    context,
+    (pw) => vaultController.unlock(widget.client, pw),
+  );
 
   Future<void> _load() async {
     _loadContinue();
@@ -115,9 +134,22 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        widget.server.name,
-                        style: text.headlineMedium,
+                      child: RawGestureDetector(
+                        gestures: {
+                          LongPressGestureRecognizer:
+                              GestureRecognizerFactoryWithHandlers<
+                                LongPressGestureRecognizer
+                              >(
+                                () => LongPressGestureRecognizer(
+                                  duration: const Duration(milliseconds: 600),
+                                ),
+                                (r) => r.onLongPress = _askPassword,
+                              ),
+                        },
+                        child: Text(
+                          widget.server.name,
+                          style: text.headlineMedium,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -204,6 +236,7 @@ class _HomePageState extends State<HomePage> {
                               ),
                         onTap: () => _open(s),
                       ),
+                    ..._vaultTiles(),
                   ],
                 ),
               ),
@@ -222,5 +255,48 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  }
+
+  /// 已解锁片库（与普通文件夹同款，名字后一个很淡的空心小点）+“现在收起”（a4 设计 2b）。
+  List<Widget> _vaultTiles() {
+    if (!vaultController.unlocked) return const [];
+    return [
+      for (final s in vaultController.shares)
+        ListTile(
+          leading: Icon(
+            Icons.folder_outlined,
+            color: s.online ? NightColors.wick : NightColors.seam,
+          ),
+          title: Row(
+            children: [
+              Flexible(child: Text(s.name, overflow: TextOverflow.ellipsis)),
+              Container(
+                key: const Key('vault-mark'),
+                width: 5,
+                height: 5,
+                margin: const EdgeInsets.only(left: 7),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: NightColors.ash.withValues(alpha: 0.8),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          subtitle: s.online
+              ? null
+              : const Text('离线', style: TextStyle(color: NightColors.ash)),
+          onTap: () => _open(s),
+        ),
+      ListTile(
+        title: const Text('现在收起'),
+        subtitle: const Text(
+          '离开 App、锁屏或 10 分钟不动，也会自动收起',
+          style: TextStyle(color: NightColors.ash, fontSize: 12, height: 1.4),
+        ),
+        onTap: vaultController.lock,
+      ),
+    ];
   }
 }

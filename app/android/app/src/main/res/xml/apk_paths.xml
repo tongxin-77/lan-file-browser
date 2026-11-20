@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 与 lib/widgets/update_dialog.dart 的下载目录一致：getApplicationCacheDirectory()/apk -->
+<paths>
+    <cache-path name="apk" path="apk/" />
+</paths>

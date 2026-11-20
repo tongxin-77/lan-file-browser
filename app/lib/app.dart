@@ -6,10 +6,23 @@ import 'pages/connect_page.dart';
 import 'pages/home_page.dart';
 import 'pages/startup_page.dart';
 import 'services/server_store.dart';
+import 'services/update_checker.dart';
+import 'services/vault.dart';
 import 'theme.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 final serverStore = ServerStore();
+
+/// 加密片库会话（仅内存）；上锁时清空图片内存缓存并回到首页（04 §8）。
+final vaultController = VaultController()..onLocked = _onVaultLocked;
+final updateChecker = UpdateChecker(() => navigatorKey.currentContext);
+
+void _onVaultLocked() {
+  PaintingBinding.instance.imageCache
+    ..clear()
+    ..clearLiveImages();
+  navigatorKey.currentState?.popUntil((r) => r.isFirst);
+}
 
 class LfbApp extends StatelessWidget {
   const LfbApp({super.key});
@@ -21,6 +34,12 @@ class LfbApp extends StatelessWidget {
       navigatorKey: navigatorKey,
       theme: buildNightTheme(),
       debugShowCheckedModeBanner: false,
+      // 任何触摸都算“有操作”，重置片库空闲计时
+      builder: (context, child) => Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => vaultController.touch(),
+        child: child,
+      ),
       home: const StartupPage(),
     );
   }
@@ -49,16 +68,19 @@ Future<void> _signOut(SavedServer server) async {
 }
 
 void openHome(SavedServer server, String token) {
+  vaultController.lock();
+  final client = clientFor(server, token);
   navigatorKey.currentState?.pushAndRemoveUntil(
     MaterialPageRoute<void>(
-      builder: (_) =>
-          HomePage(server: server, client: clientFor(server, token)),
+      builder: (_) => HomePage(server: server, client: client),
     ),
     (_) => false,
   );
+  updateChecker.start(client); // 连接成功后检查更新与电脑端版本（02 §5）
 }
 
 void showConnectPage({String? message, bool canRetry = false}) {
+  vaultController.lock();
   navigatorKey.currentState?.pushAndRemoveUntil(
     MaterialPageRoute<void>(
       builder: (_) => ConnectPage(message: message, canRetry: canRetry),

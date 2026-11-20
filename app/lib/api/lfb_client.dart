@@ -10,6 +10,7 @@ import '../models/file_item.dart';
 import '../models/server.dart';
 import '../models/share.dart';
 import '../models/subtitle.dart';
+import '../services/app_update.dart';
 import 'api_exception.dart';
 
 /// 服务端 HTTP 客户端：Bearer 鉴权、错误 JSON → [ApiException]、
@@ -34,6 +35,13 @@ class LfbClient {
   final void Function()? onUnauthorized;
   final Duration timeout;
   final http.Client _http;
+
+  /// 加密片库解锁会话（04 §5，仅内存）：非空时所有请求附 `X-Vault`，
+  /// 白名单直链附 `?v=`（见 [mediaUrl]）。由 VaultController 维护。
+  VaultAccess? vault;
+
+  /// 已解锁片库内的请求收到 404：会话已失效（04 §8），由 VaultController 上锁回首页。
+  void Function()? onVaultLost;
 
   Uri _uri(String path, [Map<String, String>? query]) => Uri(
     scheme: 'http',
@@ -111,7 +119,7 @@ class LfbClient {
 
   /// 播放器直接使用的文件 URL（`?t=` 仅 /api/file 等白名单接口有效，01 §3.3）。
   Uri fileUrl(String share, String path) =>
-      _uri('/api/file', {'share': share, 'path': path, 't': ?token});
+      mediaUrl('/api/file', {'share': share, 'path': path});
 
   /// 缩略图 URL（`?t=` 白名单接口）；[width] 为 160/320/640。
   Uri thumbUrl(String share, String path, int width) => _uri('/api/thumb', {
@@ -214,6 +222,8 @@ class LfbClient {
   }) async {
     final req = http.Request(method, _uri(path, query));
     if (token != null) req.headers['Authorization'] = 'Bearer $token';
+    final v = vault;
+    if (v != null) req.headers['X-Vault'] = v.session;
     if (headers != null) req.headers.addAll(headers);
     if (body != null) {
       req.headers['Content-Type'] = 'application/json';
@@ -234,6 +244,9 @@ class LfbClient {
     if (res.statusCode >= 400) {
       final e = parseError(res);
       if (e.isUnauthorized && token != null) onUnauthorized?.call();
+      if (res.statusCode == 404 && isVaultShare(query?['share'])) {
+        onVaultLost?.call();
+      }
       throw e;
     }
     return res;
@@ -270,4 +283,59 @@ class LfbClient {
   }
 
   void close() => _http.close();
+
+  /// 需直链的媒体 URL：附 `?t=`；已解锁时仅对 file/download/thumb 附 `?v=`（04 §5）。
+  Uri mediaUrl(String apiPath, Map<String, String> query) => _uri(apiPath, {
+    ...query,
+    't': ?token,
+    if (vaultUrlPaths.contains(apiPath)) 'v': ?vault?.session,
+  });
+
+  /// 允许 `?v=` 的接口（与服务端白名单一致，不含 APK 下载）。
+  static const vaultUrlPaths = {'/api/file', '/api/download', '/api/thumb'};
+
+  /// [shareId] 是否为当前已解锁的加密片库：其内容不得写入任何本地持久缓存（04 §8）。
+  bool isVaultShare(String? shareId) =>
+      shareId != null && (vault?.shareIds.contains(shareId) ?? false);
+
+  /// `POST /api/vault/unlock`：始终 200；密码不对时 session 为 null。
+  Future<({String? session, List<Share> shares})> unlockVault(
+    String password,
+  ) async {
+    final res = await _send(
+      'POST',
+      '/api/vault/unlock',
+      body: {'password': password},
+    );
+    final j = _json(res);
+    final items = (j['shares'] as List?) ?? const [];
+    return (
+      session: j['session'] as String?,
+      shares: items
+          .map((e) => Share.fromJson((e as Map).cast<String, dynamic>()))
+          .toList(),
+    );
+  }
+
+  /// `POST /api/vault/lock`：销毁服务端会话。
+  Future<void> lockVault(String session) async {
+    await _send('POST', '/api/vault/lock', headers: {'X-Vault': session});
+  }
+
+  /// `GET /api/app/latest`；服务端尚无版本信息（404）时返回 null。
+  Future<AppRelease?> appLatest() async {
+    try {
+      return AppRelease.fromJson(_json(await _send('GET', '/api/app/latest')));
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+}
+
+/// 加密片库解锁会话与其解锁的 shareId。
+class VaultAccess {
+  const VaultAccess(this.session, this.shareIds);
+  final String session;
+  final Set<String> shareIds;
 }
