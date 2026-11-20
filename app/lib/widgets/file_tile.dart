@@ -5,32 +5,168 @@ import '../theme.dart';
 
 /// 文件/目录行：kind 图标、名称、大小与修改时间。
 class FileTile extends StatelessWidget {
-  const FileTile({super.key, required this.item, required this.onTap});
+  const FileTile({
+    super.key,
+    required this.item,
+    required this.onTap,
+    this.thumbnail,
+  });
 
   final FileItem item;
   final VoidCallback onTap;
 
+  /// 有缩略图时替代类别图标（约 64×40）。
+  final Widget? thumbnail;
+
   @override
   Widget build(BuildContext context) {
     final time = formatTime(item.mtime);
-    return ListTile(
-      leading: Icon(
-        kindIcon(item.kind),
-        color: item.isDir || item.kind == FileKind.video
-            ? NightColors.wick
-            : NightColors.ash,
+    final p = item.progress;
+    final watched = p?.watched ?? false;
+    final info = Text(
+      item.isDir ? time : '${formatSize(item.size)} · $time',
+      style: const TextStyle(
+        color: NightColors.ash,
+        fontFeatures: [FontFeature.tabularFigures()],
       ),
-      title: Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-        item.isDir ? time : '${formatSize(item.size)} · $time',
-        style: const TextStyle(
-          color: NightColors.ash,
-          fontFeatures: [FontFeature.tabularFigures()],
-        ),
+    );
+    return Opacity(
+      // 看完的集自动变暗（设计稿 3）
+      opacity: watched ? 0.6 : 1,
+      child: ListTile(
+        leading: thumbnail != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: SizedBox(width: 64, height: 40, child: thumbnail),
+              )
+            : Icon(
+                kindIcon(item.kind),
+                color: item.isDir || item.kind == FileKind.video
+                    ? NightColors.wick
+                    : NightColors.ash,
+              ),
+        title: Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+        subtitle: p == null
+            ? info
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  info,
+                  const SizedBox(height: 6),
+                  WatchBar(progress: p),
+                ],
+              ),
+        trailing: watched
+            ? const Icon(
+                Icons.check,
+                color: NightColors.moss,
+                semanticLabel: '已看完',
+              )
+            : null,
+        onTap: onTap,
       ),
-      onTap: onTap,
     );
   }
+}
+
+/// 网格格子：缩略图 + 名称 + 观看进度。
+class FileGridTile extends StatelessWidget {
+  const FileGridTile({
+    super.key,
+    required this.item,
+    required this.onTap,
+    this.thumbnail,
+  });
+
+  final FileItem item;
+  final VoidCallback onTap;
+  final Widget? thumbnail;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = item.progress;
+    final watched = p?.watched ?? false;
+    return Opacity(
+      opacity: watched ? 0.6 : 1,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      thumbnail ??
+                          ColoredBox(
+                            color: NightColors.pillow,
+                            child: Icon(
+                              kindIcon(item.kind),
+                              size: 32,
+                              color: item.isDir || item.kind == FileKind.video
+                                  ? NightColors.wick
+                                  : NightColors.ash,
+                            ),
+                          ),
+                      if (watched)
+                        const Positioned(
+                          right: 4,
+                          top: 4,
+                          child: Icon(
+                            Icons.check_circle,
+                            size: 18,
+                            color: NightColors.moss,
+                            semanticLabel: '已看完',
+                          ),
+                        ),
+                      if (p != null && !watched)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: WatchBar(progress: p, height: 3),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                item.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: NightColors.moon),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 琥珀色观看进度条；看完为苔绿。
+class WatchBar extends StatelessWidget {
+  const WatchBar({super.key, required this.progress, this.height = 2});
+
+  final WatchProgress progress;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(height),
+    child: LinearProgressIndicator(
+      value: progress.watched ? 1 : progress.fraction,
+      minHeight: height,
+      color: progress.watched ? NightColors.moss : NightColors.wick,
+      backgroundColor: NightColors.seam,
+    ),
+  );
 }
 
 IconData kindIcon(FileKind kind) => switch (kind) {
