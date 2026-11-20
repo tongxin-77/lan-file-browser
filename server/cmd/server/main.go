@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"lfb/server/internal/auth"
 	"lfb/server/internal/config"
 	"lfb/server/internal/store"
+	"lfb/server/internal/thumb"
 )
 
 var version = "dev" // 由 -ldflags "-X main.version=..." 注入
@@ -36,6 +38,10 @@ func main() {
 }
 
 func run(dataDir string, port int) error {
+	thumbDir, err := thumbCacheDir(dataDir)
+	if err != nil {
+		return err
+	}
 	if dataDir == "" {
 		d, err := config.DefaultDir()
 		if err != nil {
@@ -64,7 +70,12 @@ func run(dataDir string, port int) error {
 	defer keeper.Close()
 	act := activity.New(activity.Options{Keeper: keeper})
 
-	srv := &api.Server{Config: config.NewStore(cfg), Auth: svc, Version: version, Port: port, Store: db, Activity: act}
+	ffmpeg := thumb.FindFFmpeg()
+	if ffmpeg == "" {
+		log.Print("未在 PATH 中找到 ffmpeg，视频不生成缩略图")
+	}
+	srv := &api.Server{Config: config.NewStore(cfg), Auth: svc, Version: version, Port: port, Store: db, Activity: act,
+		Thumbs: thumb.New(thumbDir, ffmpeg)}
 	hs := api.NewHTTPServer(fmt.Sprintf(":%d", port), srv.Handler())
 
 	// SIGTERM：Windows 关闭控制台窗口、注销、关机（CTRL_CLOSE/LOGOFF/SHUTDOWN_EVENT）
@@ -87,6 +98,19 @@ func run(dataDir string, port int) error {
 	shutdown(hs, 5*time.Second)
 	act.Close() // 恢复睡眠；之后 defer 依次关闭 keeper、数据库
 	return nil
+}
+
+// thumbCacheDir 返回缩略图缓存目录：指定 -data 时为 <数据目录>\cache\thumbs（便于测试/便携），
+// 否则 %LOCALAPPDATA%\LanFileBrowser\cache\thumbs（03 文档 4.5）。
+func thumbCacheDir(dataDir string) (string, error) {
+	if dataDir != "" {
+		return filepath.Join(dataDir, "cache", "thumbs"), nil
+	}
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "LanFileBrowser", "cache", "thumbs"), nil
 }
 
 // shutdown 优雅关闭；超时（如长视频流仍在传输）后强制 Close，仍视为正常退出。
