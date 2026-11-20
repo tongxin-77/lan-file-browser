@@ -1,0 +1,33 @@
+#!/bin/sh
+# 校验提交信息首行符合 Conventional Commits（启用：git config core.hooksPath .githooks）
+msg_file=$1
+first=$(sed -n '1p' "$msg_file" | tr -d '\r')
+
+# git 自动生成的合并 / 回滚 / fixup 信息放行
+case "$first" in
+	Merge\ *|Revert\ *|fixup!\ *|squash!\ *) exit 0 ;;
+esac
+
+types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+if ! printf '%s\n' "$first" | grep -Eq "^($types)(\([a-z0-9._/-]+\))?!?: [^ ].*"; then
+	err="首行格式不符合 Conventional Commits"
+elif [ "$(printf '%s' "$first" | LC_ALL=C.UTF-8 wc -m)" -gt 72 ]; then
+	err="首行超过 72 个字符"
+fi
+
+if [ -n "$err" ]; then
+	cat >&2 <<MSG
+commit-msg: $err
+  当前首行：$first
+
+格式：<type>(<scope>): <描述>      （scope 可省略，首行 ≤ 72 字符）
+type：feat fix docs style refactor perf test build ci chore revert
+scope 建议：server / app / web / docs / design / release / ci
+示例：
+  feat(server): 添加缩略图接口
+  fix(app): 修复断线后无法续播
+  docs: 完善 README
+MSG
+	exit 1
+fi
+exit 0

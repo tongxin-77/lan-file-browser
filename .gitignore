@@ -1,0 +1,31 @@
+# Go
+dist/
+*.exe
+*.test
+*.out
+
+# Flutter / Dart
+app/build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+app/android/.gradle/
+app/android/local.properties
+*.iml
+
+# 本地测试数据目录（go run ./cmd/server -data devdata）
+devdata/
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Android 签名材料与运行数据（见 docs/02-release.md §1）
+*.jks
+*.keystore
+key.properties
+data/
