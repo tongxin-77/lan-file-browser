@@ -143,10 +143,10 @@ func TestRoutes(t *testing.T) {
 		{"GET", "/api/continue", "192.168.1.9:1", tok, 200},
 		{"GET", "/api/thumb", "192.168.1.9:1", tok, 404},
 		{"POST", "/api/vault/unlock", "192.168.1.9:1", "", 401},
-		{"POST", "/api/vault/unlock", "192.168.1.9:1", tok, 501},
-		{"POST", "/api/vault/lock", "192.168.1.9:1", tok, 501},
+		{"POST", "/api/vault/unlock", "192.168.1.9:1", tok, 200}, // 始终 200（04 文档第 5 节）
+		{"POST", "/api/vault/lock", "192.168.1.9:1", tok, 200},
 		{"GET", "/api/admin/shares/s1/organize", "192.168.1.9:1", tok, 403},
-		{"PUT", "/api/admin/shares/s1/vault", "192.168.1.9:1", tok, 403}, // 本机 + CSRF 见 TestAdminP2Routes
+		{"PUT", "/api/admin/shares/s1/vault", "192.168.1.9:1", tok, 403}, // 本机 + CSRF 见 TestAdminVault
 	}
 	for _, c := range cases {
 		w := e.req(c.method, c.url, c.remote, c.token, nil)
