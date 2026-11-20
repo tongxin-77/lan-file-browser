@@ -6,9 +6,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -33,14 +36,15 @@ func main() {
 	dataDir := flag.String("data", "", `数据目录（默认 %APPDATA%\LanFileBrowser）`)
 	port := flag.Int("port", 0, "HTTP 端口（默认取配置，8686）")
 	updateAPI := flag.String("update-api", update.DefaultAPI, "检查更新用的 GitHub API 基址（测试用）")
+	noBrowser := flag.Bool("no-browser", false, "首次运行（刚生成配置）时不自动打开管理页")
 	flag.Parse()
 
-	if err := run(*dataDir, *port, *updateAPI); err != nil {
+	if err := run(*dataDir, *port, *updateAPI, !*noBrowser); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(dataDir string, port int, updateAPI string) error {
+func run(dataDir string, port int, updateAPI string, browser bool) error {
 	thumbDir, err := thumbCacheDir(dataDir)
 	if err != nil {
 		return err
@@ -58,6 +62,7 @@ func run(dataDir string, port int, updateAPI string) error {
 			log.SetOutput(f)
 		}
 	}
+	firstRun := !configExists(dataDir)
 	cfg, err := config.Load(dataDir)
 	if err != nil {
 		return err
@@ -101,10 +106,18 @@ func run(dataDir string, port int, updateAPI string) error {
 	orgDone := make(chan struct{})
 	go func() { org.Run(ctx); close(orgDone) }()
 
+	ln, err := net.Listen("tcp", hs.Addr)
+	if err != nil {
+		return err
+	}
 	errc := make(chan error, 1)
-	go func() { errc <- hs.ListenAndServe() }()
+	go func() { errc <- hs.Serve(ln) }()
+	adminURL := fmt.Sprintf("http://127.0.0.1:%d/", port)
 	log.Printf("LAN File Browser %s 已启动：端口 %d，数据目录 %s", version, port, dataDir)
-	log.Printf("管理页（仅本机）: http://127.0.0.1:%d/", port)
+	log.Printf("管理页（仅本机）: %s", adminURL)
+	if firstRun && browser {
+		openBrowser(adminURL) // 已在监听，浏览器打开时页面可用
+	}
 	go printPairingLoop(ctx, cfg, svc.Codes, port)
 
 	select {
@@ -118,6 +131,19 @@ func run(dataDir string, port int, updateAPI string) error {
 	<-orgDone   // 整理：当前块写完后停止并删除临时文件，之后才能关闭数据库
 	act.Close() // 恢复睡眠；之后 defer 依次关闭 keeper、数据库
 	return nil
+}
+
+// configExists 报告数据目录下是否已有 config.json（没有即首次运行）。
+func configExists(dataDir string) bool {
+	_, err := os.Stat(filepath.Join(dataDir, "config.json"))
+	return !errors.Is(err, fs.ErrNotExist)
+}
+
+// openBrowser 用默认浏览器打开 url；失败只记日志。
+func openBrowser(url string) {
+	if err := exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start(); err != nil {
+		log.Printf("打开管理页失败: %v", err)
+	}
 }
 
 // thumbCacheDir 返回缩略图缓存目录：指定 -data 时为 <数据目录>\cache\thumbs（便于测试/便携），
