@@ -52,6 +52,12 @@ func run(dataDir string, port int, updateAPI string) error {
 		}
 		dataDir = d
 	}
+	if !hasConsole() {
+		// 不关闭：main 中 log.Fatal 也要写入；进程退出时由系统关闭
+		if f, err := openLogFile(dataDir); err == nil {
+			log.SetOutput(f)
+		}
+	}
 	cfg, err := config.Load(dataDir)
 	if err != nil {
 		return err
