@@ -8,6 +8,7 @@ import (
 
 	"lfb/server/internal/activity"
 	"lfb/server/internal/config"
+	"lfb/server/internal/organize"
 	"lfb/server/internal/thumb"
 	"lfb/server/internal/update"
 	"lfb/server/internal/web"
@@ -20,10 +21,11 @@ type Server struct {
 	Port    int // 实际监听端口；0 = 取配置
 
 	// P2 依赖（测试中可为 nil，使用前判空）
-	Store    *sql.DB           // data.db，表由 internal/store 的迁移创建
-	Activity *activity.Tracker // 活跃播放跟踪（05 文档 3.4）
-	Thumbs   *thumb.Service    // 缩略图生成与缓存（03 文档 4.5）
-	Updates  *update.Checker   // 检查更新与 APK 缓存（02 文档第 5 节）
+	Store     *sql.DB           // data.db，表由 internal/store 的迁移创建
+	Activity  *activity.Tracker // 活跃播放跟踪（05 文档 3.4）
+	Thumbs    *thumb.Service    // 缩略图生成与缓存（03 文档 4.5）
+	Updates   *update.Checker   // 检查更新与 APK 缓存（02 文档第 5 节）
+	Organizer *organize.Manager // 自动整理调度（06 文档）
 
 	vault vaultState // 加密片库解锁会话（04 文档），首次使用时创建
 }

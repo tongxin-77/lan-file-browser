@@ -339,8 +339,9 @@ func TestAdminP2Routes(t *testing.T) {
 		{"PUT", "/api/admin/organize/defaults"},
 		{"POST", "/api/admin/organize/check-path"},
 	} {
-		if w := e.adminReq(c.method, c.url, "{}", nil); w.Code != 501 {
-			t.Errorf("%s %s: %d, want 501", c.method, c.url, w.Code)
+		w := e.adminReq(c.method, c.url, "{}", nil)
+		if organizeRoute := strings.Contains(c.url, "organize"); organizeRoute && (w.Code == 501 || w.Code == 403) || !organizeRoute && w.Code != 501 {
+			t.Errorf("%s %s: %d（自动整理已实现，其余应为 501）", c.method, c.url, w.Code)
 		}
 		if w := e.req(c.method, c.url, phone, "", nil); w.Code != 403 {
 			t.Errorf("局域网 %s %s: %d, want 403", c.method, c.url, w.Code)

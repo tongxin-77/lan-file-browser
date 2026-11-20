@@ -21,6 +21,7 @@ import (
 	"lfb/server/internal/api"
 	"lfb/server/internal/auth"
 	"lfb/server/internal/config"
+	"lfb/server/internal/organize"
 	"lfb/server/internal/store"
 	"lfb/server/internal/thumb"
 	"lfb/server/internal/update"
@@ -80,15 +81,19 @@ func run(dataDir string, port int, updateAPI string) error {
 	updates := update.New(update.Options{Current: version, APIBase: updateAPI,
 		CacheDir: filepath.Join(dataDir, "cache", "apk"),
 		Settings: func() config.UpdateSettings { return cfgStore.Get().Update }})
+	org := organize.New(organize.Options{Config: cfgStore, DB: db, Activity: act})
 	srv := &api.Server{Config: cfgStore, Auth: svc, Version: version, Port: port, Store: db, Activity: act,
-		Thumbs: thumb.New(thumbDir, ffmpeg), Updates: updates}
+		Thumbs: thumb.New(thumbDir, ffmpeg), Updates: updates, Organizer: org}
 	hs := api.NewHTTPServer(fmt.Sprintf(":%d", port), srv.Handler())
 
 	// SIGTERM：Windows 关闭控制台窗口、注销、关机（CTRL_CLOSE/LOGOFF/SHUTDOWN_EVENT）
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go act.Run(ctx)
-	go updates.Run(ctx)
+	updDone := make(chan struct{})
+	go func() { updates.Run(ctx); close(updDone) }()
+	orgDone := make(chan struct{})
+	go func() { org.Run(ctx); close(orgDone) }()
 
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
@@ -103,6 +108,8 @@ func run(dataDir string, port int, updateAPI string) error {
 	}
 	log.Print("正在退出…")
 	shutdown(hs, 5*time.Second)
+	<-updDone   // 更新检查：取消进行中的下载
+	<-orgDone   // 整理：当前块写完后停止并删除临时文件，之后才能关闭数据库
 	act.Close() // 恢复睡眠；之后 defer 依次关闭 keeper、数据库
 	return nil
 }
