@@ -279,15 +279,32 @@ func TestListSortAndPaging(t *testing.T) {
 	}
 }
 
+// stableETag 反复请求直到连续两次 ETag 相同后返回：NTFS 会延迟更新目录项中的 mtime/大小
+// （如刚在子目录里建文件后父目录中该子目录的 mtime），两次请求之间可能读到不同的元数据。
+func stableETag(t *testing.T, s *Server, target string) string {
+	t.Helper()
+	prev := ""
+	for range 50 {
+		w := fget(t, s, "tok1", target)
+		etag := w.Header().Get("ETag")
+		if w.Code != 200 || etag == "" {
+			t.Fatalf("%d etag=%q", w.Code, etag)
+		}
+		if etag == prev {
+			return etag
+		}
+		prev = etag
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("目录元数据持续变化，ETag 不稳定")
+	return ""
+}
+
 func TestListETag(t *testing.T) {
 	s, root := newFileServer(t)
 	target := q("/api/list", "pub", "")
-	w := fget(t, s, "tok1", target)
-	etag := w.Header().Get("ETag")
-	if w.Code != 200 || etag == "" {
-		t.Fatalf("%d etag=%q", w.Code, etag)
-	}
-	w = fget(t, s, "tok1", target, "If-None-Match", etag)
+	etag := stableETag(t, s, target)
+	w := fget(t, s, "tok1", target, "If-None-Match", etag)
 	if w.Code != 304 || w.Body.Len() != 0 {
 		t.Fatalf("未变应 304: %d", w.Code)
 	}
@@ -301,7 +318,7 @@ func TestListETag(t *testing.T) {
 		t.Errorf("新增文件后应 200 且 ETag 改变: %d", w.Code)
 	}
 	// 隐藏文件不可见时，其变化不影响 ETag
-	etag = fget(t, s, "tok1", target).Header().Get("ETag")
+	etag = stableETag(t, s, target)
 	os.WriteFile(filepath.Join(root, ".dot"), []byte("changed!"), 0o644)
 	if w := fget(t, s, "tok1", target, "If-None-Match", etag); w.Code != 304 {
 		t.Errorf("隐藏文件变化不应影响 ETag: %d", w.Code)
