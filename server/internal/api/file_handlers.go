@@ -60,13 +60,13 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 }
 
 type listItem struct {
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`
-	Size     int64  `json:"size"`
-	MTime    int64  `json:"mtime"`
-	Hidden   bool   `json:"hidden"`
-	HasThumb bool   `json:"hasThumb"`
-	Progress any    `json:"progress"` // P2 实现，P1 恒为 null
+	Name     string        `json:"name"`
+	Kind     string        `json:"kind"`
+	Size     int64         `json:"size"`
+	MTime    int64         `json:"mtime"`
+	Hidden   bool          `json:"hidden"`
+	HasThumb bool          `json:"hasThumb"`
+	Progress *itemProgress `json:"progress"` // 仅视频，本设备进度；无则 null
 }
 
 // GET /api/list?share=&path=&sort=&order=&offset=&limit=
@@ -110,6 +110,7 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 			items = append(items, it)
 		}
 	}
+	s.fillProgress(r.Context(), DeviceID(r.Context()), sh.ID, rel, items)
 	sortItems(items, sortBy, order == "desc")
 
 	etag := listETag(items, sh.Perms, sortBy, order, offset, limit)
@@ -197,13 +198,17 @@ func sortItems(items []listItem, sortBy string, desc bool) {
 	})
 }
 
-// listETag 哈希过滤排序后的完整列表（名称+大小+mtime+隐藏）与权限位；
+// listETag 哈希过滤排序后的完整列表（名称+大小+mtime+隐藏+hasThumb+本设备进度）与权限位；
 // 同时计入排序与分页参数，使不同查询的响应不共用同一 ETag。
 func listETag(items []listItem, p config.Perms, sortBy, order string, offset, limit int) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%t|%t|%t|%t|%s|%s|%d|%d\n", p.Download, p.Upload, p.Delete, p.Hidden, sortBy, order, offset, limit)
 	for _, it := range items {
-		fmt.Fprintf(h, "%s\x00%s\x00%d\x00%d\x00%t\n", it.Name, it.Kind, it.Size, it.MTime, it.Hidden)
+		fmt.Fprintf(h, "%s\x00%s\x00%d\x00%d\x00%t\x00%t", it.Name, it.Kind, it.Size, it.MTime, it.Hidden, it.HasThumb)
+		if p := it.Progress; p != nil {
+			fmt.Fprintf(h, "\x00%g\x00%g\x00%t", p.Position, p.Duration, p.Watched)
+		}
+		h.Write([]byte{'\n'})
 	}
 	return `"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
 }
