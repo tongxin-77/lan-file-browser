@@ -174,6 +174,12 @@ func cnNum(s string) (int, bool) {
 	return total, total > 0
 }
 
+// Normalize 按剧名规则规范化名称（去组名、分辨率/编码/来源/年份等标签），供整理库的电影名复用（06 文档 5.2）。
+func Normalize(s string) string { return normalizeShow(s) }
+
+// SeasonOf 返回 s（文件名或文件夹名）中的季号（S02、第二季、Season 2），没有时为 0。
+func SeasonOf(s string) int { return seasonOf(s) }
+
 // normalizeShow：去 [组名]/【组名】，去 H.265；点、下划线转空格；去中文季号、Season N；
 // 按空白分词去掉分辨率、编码、来源、年份、季号标签；合并空白，去首尾空格与 -。
 func normalizeShow(s string) string {

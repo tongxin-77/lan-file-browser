@@ -21,6 +21,7 @@ import (
 	"lfb/server/internal/api"
 	"lfb/server/internal/auth"
 	"lfb/server/internal/config"
+	"lfb/server/internal/organize"
 	"lfb/server/internal/store"
 	"lfb/server/internal/thumb"
 )
@@ -74,14 +75,18 @@ func run(dataDir string, port int) error {
 	if ffmpeg == "" {
 		log.Print("未在 PATH 中找到 ffmpeg，视频不生成缩略图")
 	}
-	srv := &api.Server{Config: config.NewStore(cfg), Auth: svc, Version: version, Port: port, Store: db, Activity: act,
-		Thumbs: thumb.New(thumbDir, ffmpeg)}
+	cfgStore := config.NewStore(cfg)
+	org := organize.New(organize.Options{Config: cfgStore, DB: db, Activity: act})
+	srv := &api.Server{Config: cfgStore, Auth: svc, Version: version, Port: port, Store: db, Activity: act,
+		Thumbs: thumb.New(thumbDir, ffmpeg), Organizer: org}
 	hs := api.NewHTTPServer(fmt.Sprintf(":%d", port), srv.Handler())
 
 	// SIGTERM：Windows 关闭控制台窗口、注销、关机（CTRL_CLOSE/LOGOFF/SHUTDOWN_EVENT）
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go act.Run(ctx)
+	orgDone := make(chan struct{})
+	go func() { org.Run(ctx); close(orgDone) }()
 
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
@@ -96,6 +101,7 @@ func run(dataDir string, port int) error {
 	}
 	log.Print("正在退出…")
 	shutdown(hs, 5*time.Second)
+	<-orgDone   // 整理：当前块写完后停止并删除临时文件，之后才能关闭数据库
 	act.Close() // 恢复睡眠；之后 defer 依次关闭 keeper、数据库
 	return nil
 }
