@@ -23,6 +23,7 @@ import (
 	"lfb/server/internal/config"
 	"lfb/server/internal/store"
 	"lfb/server/internal/thumb"
+	"lfb/server/internal/update"
 )
 
 var version = "dev" // 由 -ldflags "-X main.version=..." 注入
@@ -30,14 +31,15 @@ var version = "dev" // 由 -ldflags "-X main.version=..." 注入
 func main() {
 	dataDir := flag.String("data", "", `数据目录（默认 %APPDATA%\LanFileBrowser）`)
 	port := flag.Int("port", 0, "HTTP 端口（默认取配置，8686）")
+	updateAPI := flag.String("update-api", update.DefaultAPI, "检查更新用的 GitHub API 基址（测试用）")
 	flag.Parse()
 
-	if err := run(*dataDir, *port); err != nil {
+	if err := run(*dataDir, *port, *updateAPI); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(dataDir string, port int) error {
+func run(dataDir string, port int, updateAPI string) error {
 	thumbDir, err := thumbCacheDir(dataDir)
 	if err != nil {
 		return err
@@ -74,14 +76,19 @@ func run(dataDir string, port int) error {
 	if ffmpeg == "" {
 		log.Print("未在 PATH 中找到 ffmpeg，视频不生成缩略图")
 	}
-	srv := &api.Server{Config: config.NewStore(cfg), Auth: svc, Version: version, Port: port, Store: db, Activity: act,
-		Thumbs: thumb.New(thumbDir, ffmpeg)}
+	cfgStore := config.NewStore(cfg)
+	updates := update.New(update.Options{Current: version, APIBase: updateAPI,
+		CacheDir: filepath.Join(dataDir, "cache", "apk"),
+		Settings: func() config.UpdateSettings { return cfgStore.Get().Update }})
+	srv := &api.Server{Config: cfgStore, Auth: svc, Version: version, Port: port, Store: db, Activity: act,
+		Thumbs: thumb.New(thumbDir, ffmpeg), Updates: updates}
 	hs := api.NewHTTPServer(fmt.Sprintf(":%d", port), srv.Handler())
 
 	// SIGTERM：Windows 关闭控制台窗口、注销、关机（CTRL_CLOSE/LOGOFF/SHUTDOWN_EVENT）
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go act.Run(ctx)
+	go updates.Run(ctx)
 
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()

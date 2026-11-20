@@ -275,7 +275,12 @@ func TestServiceDeviceFromRequest(t *testing.T) {
 	if id, ok := svc.DeviceFromRequest(r); !ok || id != "dev1" {
 		t.Fatal("thumb ?t= 方式失败")
 	}
-	for _, u := range []string{"/api/shares", "/api/list", "/api/ping", "/api/devices", "/api/next", "/api/subtitles"} {
+	r = httptest.NewRequest("GET", "/api/app/apk/arm64-v8a?t="+tok, nil)
+	if id, ok := svc.DeviceFromRequest(r); !ok || id != "dev1" {
+		t.Fatal("app/apk ?t= 方式失败")
+	}
+	for _, u := range []string{"/api/shares", "/api/list", "/api/ping", "/api/devices", "/api/next", "/api/subtitles",
+		"/api/app/latest", "/api/app/apk", "/api/app/apkx"} {
 		if _, ok := svc.DeviceFromRequest(httptest.NewRequest("GET", u+"?t="+tok, nil)); ok {
 			t.Fatalf("%s 不应接受 ?t=", u)
 		}
