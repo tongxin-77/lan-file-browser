@@ -80,7 +80,7 @@ flutter build apk --release --split-per-abi
 ### 流程
 
 - TDD：安全相关规则（路径校验、鉴权、404 隐藏、CSRF、脱敏）先写失败测试再实现；Bug 先写复现测试。
-- 文件统一 UTF-8、LF 换行（新建文件用 LF；`README.md` 目前为 CRLF，改动时顺带转换须先确认）。
+- 文件统一 UTF-8、LF 换行（由 `.gitattributes` 强制；`.bat`、`.cmd`、`.ps1` 为 CRLF）。
 - 新增功能前先读对应设计文档与 `docs/07-notes.md` 相应小节；实现与文档不一致时同步更新文档，事项解决后在 07-notes 划掉或删除。
 - `server/`、`app/` 可能有其他人同时在改：只改任务涉及的文件。
 

@@ -49,7 +49,7 @@
 | `golang.org/x/sys` | 固定 v0.46.0，更高版本要求 Go 1.26；升级前同步调整 `go.mod` 的 go 版本 |
 | 仅 Windows 可编译 | 服务端依赖 `golang.org/x/sys/windows`，CI 必须使用 Windows runner（02 已按此设计） |
 | 无零拷贝 | 桌面版 Windows 上 Go 不走 TransmitFile，属预期行为（05 §3） |
-| 尚未使用 git | 代码未纳入版本管理，需要时初始化仓库并首次提交 |
+| git 仓库 | 公开仓库 https://github.com/tongxin-77/lan-file-browser（Apache-2.0）；本机 ssh 推送需先把 github.com 主机密钥加入 known_hosts（`ssh -T git@github.com` 核对指纹），或 `gh auth refresh -s workflow` 后用 HTTPS 推送（推 `.github/workflows/` 需要 workflow 权限） |
 
 ## 5. 播放相关待实测（见 05）
 
