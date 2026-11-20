@@ -67,7 +67,7 @@ P1 验收需包含上述四种链接在 Windows 上的实测用例。
 
 | 类别 | 判定 | 显示隐藏文件=关 | 显示隐藏文件=开 |
 | ---- | ---- | ---- | ---- |
-| 始终隐藏 | `$RECYCLE.BIN`、`System Volume Information`、`desktop.ini`、`thumbs.db`、上传临时文件 `.lfb-upload-*` | 不列出，访问 `NOT_FOUND` | 同左 |
+| 始终隐藏 | `$RECYCLE.BIN`、`System Volume Information`、`desktop.ini`、`thumbs.db`、上传临时文件 `.lfb-upload-*`、整理复制临时文件 `.lfb-copying-*` | 不列出，访问 `NOT_FOUND` | 同左 |
 | 隐藏文件 | Windows `Hidden` 属性，或名称以 `.` 开头 | 不列出，访问 `NOT_FOUND` | 列出，`hidden: true` |
 
 判定作用于路径的**每一段**（隐藏目录下的文件同样不可见）。
