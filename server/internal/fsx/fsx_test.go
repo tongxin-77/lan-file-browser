@@ -291,12 +291,12 @@ func TestSymlinks(t *testing.T) {
 }
 
 func TestIsAlwaysHidden(t *testing.T) {
-	for _, n := range []string{"$RECYCLE.BIN", "$recycle.bin", "System Volume Information", "Desktop.ini", "THUMBS.DB", ".lfb-upload-x1"} {
+	for _, n := range []string{"$RECYCLE.BIN", "$recycle.bin", "System Volume Information", "Desktop.ini", "THUMBS.DB", ".lfb-upload-x1", ".LFB-copying-ab"} {
 		if !IsAlwaysHidden(n) {
 			t.Errorf("IsAlwaysHidden(%q) = false", n)
 		}
 	}
-	for _, n := range []string{"a.txt", "desktop.ini.bak", "recycle.bin"} {
+	for _, n := range []string{"a.txt", "desktop.ini.bak", "recycle.bin", ".lfb-copy"} {
 		if IsAlwaysHidden(n) {
 			t.Errorf("IsAlwaysHidden(%q) = true", n)
 		}
