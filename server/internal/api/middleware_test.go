@@ -138,8 +138,9 @@ func TestRoutes(t *testing.T) {
 		{"GET", "/api/next", "192.168.1.9:1", "", 401},
 		{"GET", "/api/next", "192.168.1.9:1", tok, 501},
 		{"GET", "/api/subtitles", "192.168.1.9:1", tok, 501},
-		{"POST", "/api/progress", "192.168.1.9:1", tok, 501},
-		{"GET", "/api/continue", "192.168.1.9:1", tok, 501},
+		{"POST", "/api/progress", "192.168.1.9:1", "", 401},
+		{"POST", "/api/progress", "192.168.1.9:1", tok, 400}, // 空请求体
+		{"GET", "/api/continue", "192.168.1.9:1", tok, 200},
 		{"GET", "/api/thumb", "192.168.1.9:1", tok, 501},
 		{"POST", "/api/vault/unlock", "192.168.1.9:1", "", 401},
 		{"POST", "/api/vault/unlock", "192.168.1.9:1", tok, 501},
