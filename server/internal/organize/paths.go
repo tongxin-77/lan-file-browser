@@ -15,10 +15,13 @@ type LayoutError struct {
 
 func (e *LayoutError) Error() string { return e.Msg }
 
-// canon 返回规范化后的真实路径（解析链接/联接）；目录不存在时退化为词法规范化。
+// canon 返回规范化后的真实路径（解析链接/联接/8.3 短名）；路径不存在时解析最近的已存在祖先再拼回剩余部分。
 func canon(p string) string {
+	p = filepath.Clean(p)
 	if r, err := realPath(p); err == nil {
 		p = r
+	} else if dir := filepath.Dir(p); dir != p {
+		p = canon(dir) + `\` + filepath.Base(p)
 	}
 	return strings.TrimRight(strings.ToLower(filepath.Clean(p)), `\`)
 }
