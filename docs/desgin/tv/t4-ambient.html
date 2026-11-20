@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<!--
+================================================================
+ LAN File Browser · Android TV 设计稿 T4「客厅氛围 / 待机画报」
+================================================================
+方向
+  电视不放片时也是客厅的一部分。首页是一幅随时间缓慢变化的画报：相册照片
+  极慢地平移、交叉淡入，画面左下角有一团“落地灯”式的环境光，会随时间在
+  暖琥珀 / 玫瑰灰 / 月光蓝之间漂移；遥控器焦点落到哪张卡片，环境光就取那张
+  卡片的颜色。无操作 8 秒后，所有界面元素隐退，只留时钟与照片说明；按任意键
+  浮现（这一下只唤醒，不触发操作）。整体低刺激，适合关灯后看。
+
+配色（全部取自真实客厅环境，不用荧光色）
+  夜窗靛  #1C2230  主背景，窗外的夜色（偏蓝的深灰，而非近黑）
+  暮墙紫  #2E2A3A  面板/卡片底，暗下来的墙面
+  灯罩琥珀 #E9B676  焦点、进度、唯一强调色（落地灯透过灯罩的光）
+  亚麻白  #EFE6D6  正文（暖白，避免纯白刺眼）
+  雾蓝灰  #8D93A6  次要文字（在 #1C2230 上对比度约 5.6:1）
+  绿植苔  #93A58C  “已看完/已连接”等完成态
+  环境光漂移色：琥珀 #E9B676 → 玫瑰灰 #C98F8A → 月光蓝 #7C8DB5
+
+字体（设计稿只用 Windows 系统字体）
+  中文展示：KaiTi（楷体）——屏幕标题、行标题、日期，像画报题字，有温度
+  数字展示：Sitka Banner / Sitka Display（Windows 自带衬线）——时钟、时间码
+  界面正文：Microsoft YaHei UI
+  字号（1080p 画布）：正文 24 / 卡片标题 28 / 行标题 34 / 屏幕标题 48–64 / 时钟 168
+最终 App 建议打包（均为 OFL 开源）
+  霞鹜文楷 LXGW WenKai（替代楷体，展示用）
+  HarmonyOS Sans SC 或 思源黑体 Noto Sans SC（界面正文）
+  Newsreader（时钟、时间码等数字展示，替代 Sitka）
+
+布局
+  1920×1080 画布，四周 96px / 54px 安全边距（5%），页面顶部可开关安全区参考线。
+  横向行为主、层级浅：首页三行（继续观看 / 共享文件夹 / 最近添加），焦点进入
+  下方行时整组上移、时钟淡出；文件夹页左侧为“焦点详情”，右侧为剧集网格并随
+  焦点纵向滚动。所有屏幕的照片、海报、剧照都由内联 SVG 生成。
+
+焦点规范
+  - 焦点项：放大 1.06、3px 灯罩琥珀描边（外移 6px）+ 同色柔光晕；标题变亮白
+  - 同组非焦点项降到 72% 不透明度，让焦点在 3 米外也一眼可辨
+  - 环境光（背景大光斑）实时取焦点项的主色，作为第二重焦点提示
+  - 每屏打开时都有默认焦点；返回键（Esc/Backspace）在播放页用于取消下一集
+  - 演示：点击任一屏幕后，用方向键 / Enter（确认）/ Esc（返回）/ M（菜单）操作
+
+非媒体文件
+  文件夹页隐藏 .nfo、poster.jpg；字幕 .srt 不作为卡片出现，只在详情区写明
+  “已找到中文字幕，播放时自动加载”。
+
+加密片库（依据 docs/04-vault.md 第 2、4、5 节）
+  - 无可见入口：首页长按遥控器“菜单”键约 1 秒弹出“输入密码”（画框 2b）。屏幕内
+    任何文字都不出现“私密”“加密”“已锁定”。沿用连接页的数字键盘与焦点样式；
+    遥控器数字键可直接输入，输入后焦点跳到“确认”。
+  - 所有密码走同一条路径、同样约 0.8 秒等待（对应服务端固定最短耗时）；密码不对
+    与“没有加密片库”表现完全一样：只清空输入，不提示。演示密码 0000。
+  - 解锁后的首页（画框 2c）：共享文件夹行多出“工作资料”，与普通片库同款，仅在
+    项目数后加一个 8px 的极淡空心小圆；最近添加合并它的新文件。
+  - “工作资料”即加密片库，所以锁定状态的首页（画框 2）不再出现它及其最近添加。
+  - 首页“相册画报”轮播在任何状态下都只取普通相册照片，绝不取加密片库内容。
+  - 按 Home 回到桌面、电视待机、空闲 10 分钟 → 立即上锁；回到首页时它已消失，
+    不提示原因。演示：首页画框按住 M；画框 2c 中 H 键模拟 Home，或用上方按钮。
+================================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T4 客厅氛围 / 待机画报 — 电视端设计稿</title>
+<style>
+@property --glow { syntax: '<color>'; inherits: true; initial-value: #E9B676; }
+
+:root{
+  --night:#1C2230; --dusk:#2E2A3A; --lamp:#E9B676; --linen:#EFE6D6;
+  --haze:#8D93A6; --sage:#93A58C; --rose:#C98F8A; --moon:#7C8DB5;
+  --wall:#2A2521;
+  --kai:"KaiTi","STKaiti","楷体",serif;
+  --num:"Sitka Banner","Sitka Display","Sitka Text",Georgia,serif;
+  --ui:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--wall);color:var(--linen);font-family:var(--ui)}
+body{
+  background:
+    radial-gradient(1200px 700px at 8% -10%, rgba(233,182,118,.16), transparent 60%),
+    radial-gradient(900px 600px at 100% 30%, rgba(124,141,181,.10), transparent 60%),
+    var(--wall);
+  min-height:100vh;
+}
+
+/* ---------- 展示页外壳 ---------- */
+.page{max-width:1480px;margin:0 auto;padding:48px 32px 96px}
+.intro{display:flex;justify-content:space-between;align-items:flex-end;gap:32px;margin-bottom:40px}
+.intro h1{font-family:var(--kai);font-weight:400;font-size:44px;letter-spacing:.04em}
+.intro p{color:#B9AFA2;font-size:15px;line-height:1.8;max-width:62ch;margin-top:8px}
+.intro kbd{font-family:var(--ui);font-size:13px;border:1px solid #5a514a;border-radius:4px;padding:0 6px;color:var(--linen)}
+.tbtn{font:inherit;font-size:14px;color:var(--linen);background:transparent;border:1px solid #5a514a;border-radius:999px;padding:8px 16px;cursor:pointer;white-space:nowrap}
+.tbtn:hover{border-color:var(--lamp)}
+.tbtn[aria-pressed="true"]{background:rgba(233,182,118,.16);border-color:var(--lamp)}
+
+.screen{margin-bottom:64px}
+.cap{display:flex;justify-content:space-between;align-items:baseline;gap:24px;margin-bottom:14px}
+.cap h2{font-family:var(--kai);font-weight:400;font-size:28px}
+.cap p{color:#B9AFA2;font-size:14px;line-height:1.7;flex:1}
+.cap .acts{display:flex;gap:8px}
+
+.bezel{padding:14px;background:#191716;border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.45);transition:box-shadow .3s}
+.screen.active .bezel{box-shadow:0 30px 80px rgba(0,0,0,.45),0 0 0 2px rgba(233,182,118,.55)}
+.stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;border-radius:4px;cursor:pointer;--s:.5}
+.tv{position:absolute;left:0;top:0;width:1920px;height:1080px;transform:scale(var(--s));transform-origin:0 0;
+  overflow:hidden;background:var(--night);color:var(--linen);font-size:24px;line-height:1.45;font-variant-numeric:lining-nums}
+.safe{position:absolute;inset:54px 96px;border:2px dashed rgba(233,182,118,.5);pointer-events:none;z-index:99;display:none}
+body.show-safe .safe{display:block}
+
+/* ---------- 通用元素 ---------- */
+.glow{position:absolute;inset:0;pointer-events:none;transition:--glow 1.4s ease;
+  background:radial-gradient(1100px 760px at 6% 104%, color-mix(in srgb,var(--glow) 42%,transparent), transparent 70%)}
+.kai{font-family:var(--kai);font-weight:400}
+.num{font-family:var(--num)}
+.dim{color:var(--haze)}
+.bar{height:6px;border-radius:3px;background:rgba(239,230,214,.16);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--lamp);border-radius:3px}
+.bar.done i{background:var(--sage)}
+.toast{position:absolute;left:50%;top:84px;transform:translate(-50%,-20px);opacity:0;transition:.4s;z-index:50;
+  background:rgba(46,42,58,.92);border:1px solid rgba(233,182,118,.4);border-radius:40px;padding:14px 32px;font-size:26px}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+svg{display:block}
+
+/* 焦点规范 */
+[data-f]{transition:transform .22s ease, opacity .22s ease, box-shadow .22s ease;}
+.focus-group [data-f]:not(.is-focus){opacity:.72}
+.is-focus{transform:scale(1.06);z-index:5;position:relative;
+  box-shadow:0 0 0 6px var(--night),0 0 0 9px var(--lamp),0 18px 60px color-mix(in srgb,var(--lamp) 35%,transparent)}
+.is-focus .t{color:#fff}
+
+/* ================= 1 连接电脑 ================= */
+#s-connect .win{position:absolute;inset:0}
+#s-connect .left{position:absolute;left:96px;top:120px;width:760px}
+#s-connect h3{font-size:64px;line-height:1.2;margin-bottom:16px}
+#s-connect .sub{font-size:26px;color:var(--haze);margin-bottom:56px}
+.dev{display:flex;align-items:center;gap:28px;padding:26px 32px;border-radius:18px;background:rgba(46,42,58,.72);margin-bottom:22px;width:720px}
+.dev .ico{width:64px;height:64px;flex:none;border-radius:14px;background:rgba(239,230,214,.08);display:grid;place-items:center}
+.dev .t{font-size:32px}
+.dev .m{font-size:24px;color:var(--haze)}
+.dev .st{margin-left:auto;font-size:24px;color:var(--lamp)}
+.dev.manual{background:transparent;border:2px solid rgba(239,230,214,.14)}
+#s-connect .pair{position:absolute;right:96px;top:120px;width:900px;padding:48px 56px;border-radius:28px;
+  background:rgba(28,34,48,.78);border:1px solid rgba(239,230,214,.1);backdrop-filter:blur(8px)}
+.pair h4{font-size:40px;margin-bottom:8px}
+.pair .hint{color:var(--haze);font-size:24px;margin-bottom:36px}
+.code{display:flex;gap:18px;margin-bottom:40px}
+.code span{width:92px;height:112px;border-radius:14px;background:rgba(239,230,214,.07);display:grid;place-items:center;
+  font-family:var(--num);font-size:64px;border-bottom:4px solid rgba(239,230,214,.18)}
+.code span.cur{border-bottom-color:var(--lamp);animation:blink 1.2s steps(2) infinite}
+@keyframes blink{50%{border-bottom-color:transparent}}
+.pad{display:grid;grid-template-columns:repeat(3,160px);gap:16px;justify-content:start}
+.pad button{font:inherit;color:var(--linen);height:84px;border:0;border-radius:14px;background:rgba(239,230,214,.08);
+  font-family:var(--num);font-size:40px}
+.pad button.w{font-family:var(--ui);font-size:26px}
+.pad button.ok{background:rgba(233,182,118,.2)}
+.cast{position:absolute;right:48px;bottom:52px;width:230px;color:var(--haze);font-size:24px;line-height:1.5}
+.cast b{display:block;color:var(--linen);font-weight:400;font-size:26px;margin:14px 0 6px}
+.dots i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--lamp);margin-right:8px;animation:dot 1.6s infinite}
+.dots i:nth-child(2){animation-delay:.25s}.dots i:nth-child(3){animation-delay:.5s}
+@keyframes dot{0%,100%{opacity:.2}50%{opacity:1}}
+
+/* ================= 2 首页（待机画报） ================= */
+:is(#s-home,#s-vhome) .photo{position:absolute;inset:-6%;opacity:0;transition:opacity 3s ease}
+:is(#s-home,#s-vhome) .photo.on{opacity:1}
+:is(#s-home,#s-vhome) .photo svg{width:100%;height:100%}
+:is(#s-home,#s-vhome) .photo.on svg{animation:kb 40s ease-in-out infinite alternate}
+@keyframes kb{from{transform:scale(1.02) translate(0,0)}to{transform:scale(1.12) translate(-3%,-2%)}}
+:is(#s-home,#s-vhome) .shade{position:absolute;inset:0;transition:opacity 1.6s;
+  background:linear-gradient(180deg,rgba(28,34,48,.55) 0%,rgba(28,34,48,.05) 30%,rgba(28,34,48,.55) 52%,rgba(28,34,48,.94) 78%)}
+:is(#s-home,#s-vhome) .drift{position:absolute;inset:0;pointer-events:none;mix-blend-mode:soft-light;
+  background:radial-gradient(900px 700px at 0% 100%, #E9B676, transparent 70%);animation:drift 90s linear infinite}
+@keyframes drift{0%,100%{filter:hue-rotate(0)}33%{filter:hue-rotate(-28deg)}66%{filter:hue-rotate(160deg)}}
+:is(#s-home,#s-vhome) .clock{position:absolute;left:96px;top:54px;transition:opacity .8s, transform .8s}
+:is(#s-home,#s-vhome) .clock .num{font-size:168px;line-height:1;letter-spacing:-.01em;font-weight:300}
+:is(#s-home,#s-vhome) .clock .kai{font-size:36px;margin-top:6px;opacity:.9}
+:is(#s-home,#s-vhome) .conn{position:absolute;right:96px;top:72px;display:flex;align-items:center;gap:14px;font-size:24px;
+  padding:12px 24px;border-radius:40px;background:rgba(28,34,48,.5);transition:opacity .8s}
+:is(#s-home,#s-vhome) .conn i{width:12px;height:12px;border-radius:50%;background:var(--sage)}
+:is(#s-home,#s-vhome) .rows{position:absolute;left:96px;right:0;top:400px;transition:transform .5s ease, opacity .8s}
+:is(#s-home,#s-vhome).deep .rows{transform:translateY(-344px)}
+:is(#s-home,#s-vhome).deep .clock{opacity:0;transform:translateY(-30px)}
+.row{margin-bottom:26px;transition:margin-bottom .5s ease}
+:is(#s-home,#s-vhome).deep .row{margin-bottom:20px}
+.row h5{font-family:var(--kai);font-weight:400;font-size:34px;margin-bottom:14px;opacity:.92}
+.track{display:flex;gap:32px;position:relative}
+.cw{width:400px}
+.cw .th{width:400px;height:225px;border-radius:16px;overflow:hidden;position:relative}
+.cw .th .bar{position:absolute;left:16px;right:16px;bottom:14px}
+.cw .t{font-size:28px;margin-top:14px;white-space:nowrap}
+.cw .m{font-size:24px;color:var(--haze)}
+.cw.is-focus{box-shadow:none}
+.cw.is-focus .th{box-shadow:0 0 0 6px var(--night),0 0 0 9px var(--lamp),0 18px 60px color-mix(in srgb,var(--lamp) 35%,transparent)}
+.fd{width:300px;height:140px;border-radius:18px;padding:22px 26px;display:flex;flex-direction:column;justify-content:space-between;
+  background:color-mix(in srgb,var(--c) 30%,rgba(28,34,48,.86))}
+.fd .top{display:flex;justify-content:space-between;align-items:center}
+.fd .t{font-size:32px}
+.fd .m{font-size:24px;color:rgba(239,230,214,.7)}
+.rc{width:340px}
+.rc .th{width:340px;height:191px;border-radius:14px;overflow:hidden}
+.rc .t{font-size:26px;margin-top:12px}
+.rc .m{font-size:24px;color:var(--haze)}
+.rc.is-focus{box-shadow:none}
+.rc.is-focus .th{box-shadow:0 0 0 6px var(--night),0 0 0 9px var(--lamp)}
+#s-home .idlecap{position:absolute;left:96px;bottom:54px;opacity:0;transition:opacity 1.6s}
+#s-home .idlecap .kai{font-size:34px}
+#s-home .idlecap .dim{font-size:24px;margin-top:4px}
+/* 待机：界面隐退 */
+#s-home.idle .rows,#s-home.idle .conn{opacity:0;transform:translateY(40px);pointer-events:none}
+#s-home.idle .shade{opacity:.35}
+#s-home.idle .glow{opacity:.4}
+#s-home.idle .idlecap{opacity:1}
+#s-home.idle .clock{opacity:.92;transform:none}
+
+/* ================= 2b 输入密码（长按菜单键） ================= */
+#s-pin .pinbg{position:absolute;inset:-40px;filter:blur(14px) saturate(.85)}
+#s-pin .pinbg svg{width:100%;height:100%}
+#s-pin .pinbg::after{content:"";position:absolute;inset:0;background:rgba(28,34,48,.74)}
+#s-pin .dlg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:640px;padding:48px 64px 56px;border-radius:28px;
+  background:rgba(28,34,48,.86);border:1px solid rgba(239,230,214,.1);box-shadow:0 40px 120px rgba(0,0,0,.45)}
+#s-pin .dlg h4{font-size:40px;margin-bottom:8px}
+#s-pin .dlg .hint{color:var(--haze);font-size:24px;margin-bottom:32px}
+.pw{height:96px;border-radius:14px;background:rgba(239,230,214,.07);border-bottom:4px solid rgba(239,230,214,.18);margin-bottom:36px;
+  display:flex;align-items:center;justify-content:center;gap:14px}
+.pw i{width:18px;height:18px;border-radius:50%;background:var(--linen)}
+.pw b{width:3px;height:44px;background:var(--lamp);animation:blinkc 1.2s steps(2) infinite}
+@keyframes blinkc{50%{opacity:0}}
+.pw.busy b{display:none}
+.pw.busy i{animation:dot 1.6s infinite}
+
+/* ================= 2c 解锁后的首页 ================= */
+#s-vhome.locked .vx{display:none}
+#s-vhome .vmark{display:inline-block;width:8px;height:8px;margin-left:12px;vertical-align:middle;border-radius:50%;border:1.5px solid rgba(239,230,214,.42)}
+#s-vhome.fade .rows{opacity:0}
+#s-vhome .desk{position:absolute;inset:0;z-index:60;background:#0E1118;opacity:0;pointer-events:none;transition:opacity .5s}
+#s-vhome.away .desk{opacity:1}
+
+/* ================= 3 文件夹浏览 ================= */
+#s-folder .bgposter{position:absolute;left:-200px;top:-200px;width:1100px;height:1500px;opacity:.16;filter:blur(40px);-webkit-mask-image:radial-gradient(closest-side,#000 40%,transparent);mask-image:radial-gradient(closest-side,#000 40%,transparent)}
+#s-folder .crumb{position:absolute;left:96px;top:54px;font-size:48px;white-space:nowrap}
+#s-folder .crumb span{color:var(--haze)}
+#s-folder .crumb em{font-style:normal;color:var(--haze);margin:0 18px}
+#s-folder .sort{position:absolute;right:96px;top:62px;font-size:24px;padding:10px 26px;border-radius:30px;background:rgba(46,42,58,.8)}
+#s-folder .detail{position:absolute;left:96px;top:180px;width:520px}
+#s-folder .detail .post{width:220px;height:330px;border-radius:12px;overflow:hidden;margin-bottom:34px;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+#s-folder .detail h6{font-family:var(--kai);font-weight:400;font-size:56px;line-height:1.15;margin-bottom:14px}
+#s-folder .detail .m{font-size:26px;color:var(--haze);margin-bottom:10px}
+#s-folder .detail .bar{width:420px;margin:18px 0 26px}
+#s-folder .detail .file{font-size:24px;color:var(--haze);border-top:1px solid rgba(239,230,214,.12);padding-top:22px;margin-top:22px;line-height:1.6}
+#s-folder .detail .file b{font-weight:400;color:var(--linen)}
+#s-folder .gridvp{position:absolute;left:680px;right:60px;top:170px;bottom:0;overflow:hidden;padding:16px 36px 0 16px;
+  -webkit-mask-image:linear-gradient(transparent 0,#000 40px,#000 calc(100% - 60px),transparent);mask-image:linear-gradient(transparent 0,#000 40px,#000 calc(100% - 60px),transparent)}
+#s-folder .grid{display:grid;grid-template-columns:repeat(4,250px);gap:44px 30px;position:relative;transition:transform .4s ease;padding-bottom:80px}
+.ep .th{width:250px;height:141px;border-radius:12px;overflow:hidden;position:relative}
+.ep .bar{position:absolute;left:12px;right:12px;bottom:10px;height:5px}
+.ep .badge{position:absolute;right:10px;top:10px;font-size:20px;padding:2px 12px;border-radius:20px;background:rgba(28,34,48,.78);color:var(--sage)}
+.ep .badge.new{color:var(--lamp)}
+.ep .t{font-size:26px;margin-top:12px;white-space:nowrap}
+.ep .m{font-size:24px;color:var(--haze)}
+.ep.is-focus{box-shadow:none}
+.ep.is-focus .th{box-shadow:0 0 0 6px var(--night),0 0 0 9px var(--lamp),0 18px 50px color-mix(in srgb,var(--lamp) 30%,transparent)}
+.ep.folder .th{background:rgba(46,42,58,.9);display:grid;place-items:center}
+
+/* ================= 4 视频播放 ================= */
+#s-video .scene{position:absolute;inset:0}
+#s-video .scene svg{width:100%;height:100%}
+#s-video .ctl{position:absolute;inset:0;transition:opacity .5s}
+#s-video .ctl::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(28,34,48,.7),transparent 24%,transparent 46%,rgba(28,34,48,.92) 78%)}
+#s-video .ttl{position:absolute;left:96px;top:54px}
+#s-video .ttl .kai{font-size:48px}
+#s-video .prog{position:absolute;left:96px;right:96px;top:640px}
+#s-video .prog .bar{height:8px;position:relative;overflow:visible}
+#s-video .prog .bar b{position:absolute;left:70%;top:50%;width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:50%;background:var(--linen)}
+#s-video .prog .tc{display:flex;justify-content:space-between;margin-top:14px;font-family:var(--num);font-size:28px}
+#s-video .btns{position:absolute;left:96px;top:726px;display:flex;gap:18px}
+.pill{display:flex;align-items:center;gap:12px;height:68px;padding:0 30px;border-radius:34px;background:rgba(46,42,58,.85);font-size:26px;white-space:nowrap}
+.pill .dim{font-size:24px}
+.pill.play{width:68px;padding:0;justify-content:center}
+#s-video .epvp{position:absolute;left:96px;right:0;top:838px;height:200px;overflow:hidden;padding:10px 0 0 10px}
+#s-video .eprow{display:flex;gap:24px;position:relative;transition:transform .4s}
+.mini{width:240px;flex:none}
+.mini .th{width:240px;height:135px;border-radius:10px;overflow:hidden;position:relative}
+.mini .th .bar{position:absolute;left:10px;right:10px;bottom:8px;height:5px}
+.mini .t{font-size:24px;margin-top:8px;white-space:nowrap}
+.mini.now .t{color:var(--lamp)}
+.mini.is-focus{box-shadow:none}
+.mini.is-focus .th{box-shadow:0 0 0 5px var(--night),0 0 0 8px var(--lamp)}
+#s-video.clean .ctl{opacity:0}
+/* 片尾自动下一集 */
+#s-video .end{position:absolute;inset:0;display:none}
+#s-video.ending .end{display:block}
+#s-video.ending .ctl{display:none}
+#s-video .end::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent 30%,rgba(28,34,48,.9) 70%)}
+#s-video .credits{position:absolute;left:96px;top:0;width:360px;text-align:center;color:rgba(239,230,214,.55);font-size:24px;line-height:2.2;animation:roll 30s linear infinite}
+@keyframes roll{from{transform:translateY(1080px)}to{transform:translateY(-100%)}}
+#s-video .next{position:absolute;right:96px;bottom:96px;width:820px}
+.next .row1{display:flex;gap:32px;align-items:center;margin-bottom:36px}
+.next .th{width:320px;height:180px;border-radius:14px;overflow:hidden;flex:none}
+.next .in{font-size:28px;color:var(--haze)}
+.next .in .kai{display:block;white-space:nowrap;font-size:46px;color:var(--linen);margin-top:6px;line-height:1.2}
+.ring{position:relative;width:96px;height:96px;flex:none}
+.ring svg{transform:rotate(-90deg)}
+.ring .n{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--num);font-size:44px}
+.ring circle.p{transition:stroke-dashoffset 1s linear}
+.next .acts{display:flex;gap:20px;align-items:center}
+.next .acts .pill{height:76px;padding:0 40px;font-size:28px}
+.next .acts .pill.go{background:var(--lamp);color:#2A2230}
+.next .back{margin-left:12px;font-size:24px;color:var(--haze)}
+
+/* ================= 5 图片查看 ================= */
+#s-photo .blurbg{position:absolute;inset:-80px;filter:blur(60px) saturate(.9);opacity:.55}
+#s-photo .blurbg svg,#s-photo .img svg{width:100%;height:100%}
+#s-photo .img{position:absolute;left:240px;top:0;width:1440px;height:1080px;transition:opacity .9s}
+#s-photo .img.fade{opacity:0}
+#s-photo .img.is-focus{transform:none;box-shadow:none;z-index:auto}
+#s-photo .chrome{transition:opacity .6s}
+#s-photo.playing .chrome{opacity:0}
+#s-photo .top{position:absolute;left:96px;top:54px;right:96px;display:flex;justify-content:space-between;align-items:flex-start;
+  padding:4px 0}
+#s-photo .top .kai{font-size:36px;text-shadow:0 2px 16px rgba(0,0,0,.5)}
+#s-photo .top .dim{font-size:24px;color:rgba(239,230,214,.75);text-shadow:0 2px 12px rgba(0,0,0,.5)}
+#s-photo .img.is-focus~.chrome .chev{box-shadow:0 0 0 3px var(--lamp)}
+#s-photo .chev{position:absolute;top:600px;transition:box-shadow .2s;width:80px;height:80px;border-radius:50%;background:rgba(28,34,48,.55);display:grid;place-items:center}
+#s-photo .chev.l{left:96px}#s-photo .chev.r{right:96px}
+#s-photo .bottom{position:absolute;left:0;right:0;bottom:0;height:300px;background:linear-gradient(transparent,rgba(28,34,48,.92) 60%)}
+#s-photo .strip{position:absolute;left:96px;bottom:54px;display:flex;gap:14px;align-items:flex-end}
+#s-photo .strip div{width:128px;height:96px;border-radius:8px;overflow:hidden;opacity:.55;transition:.3s}
+#s-photo .strip div.cur{opacity:1;outline:3px solid var(--lamp);outline-offset:4px}
+#s-photo .pbtns{position:absolute;right:96px;bottom:54px;display:flex;gap:18px}
+#s-photo .info{position:absolute;right:96px;top:150px;width:440px;padding:34px 38px;border-radius:22px;background:rgba(28,34,48,.86);
+  font-size:24px;line-height:1.5;transition:opacity .4s, transform .4s}
+#s-photo .info.off{opacity:0;transform:translateX(30px)}
+#s-photo .info dt{color:var(--haze);margin-top:16px}
+#s-photo .info dt:first-child{margin-top:0}
+#s-photo .info dd{font-size:28px}
+#s-photo .sprog{position:absolute;left:0;top:0;height:4px;background:var(--lamp);width:0;opacity:0}
+#s-photo.playing .sprog{opacity:.8;animation:sp 5s linear infinite}
+@keyframes sp{from{width:0}to{width:100%}}
+#s-photo .phint{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);font-size:24px;color:rgba(239,230,214,.6);opacity:0;transition:.6s}
+#s-photo.playing .phint{opacity:1}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition-duration:.01ms!important}
+}
+@media (max-width:760px){
+  .intro,.cap{flex-direction:column;align-items:flex-start}
+  .page{padding:24px 12px 60px}
+  .bezel{padding:6px}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="intro">
+    <div>
+      <h1>客厅氛围：电视端设计稿</h1>
+      <p>电视不放片的时候，也是客厅的一部分。点一下任意屏幕开始操作：<kbd>↑ ↓ ← →</kbd> 移动焦点，<kbd>Enter</kbd> 确认，<kbd>Esc</kbd> 返回，<kbd>M</kbd> 菜单。首页无操作 8 秒会进入待机画报，按任意键浮现。</p>
+    </div>
+    <button class="tbtn" id="safeBtn" aria-pressed="false">显示安全区</button>
+  </header>
+
+  <!-- ============ 1 连接电脑 ============ -->
+  <section class="screen" data-screen="connect">
+    <div class="cap"><h2>连接电脑</h2><p>自动发现局域网里的电脑；首次连接用遥控器数字键盘输入电脑管理页上的 6 位配对码，或在已配对的手机上投送配对。</p></div>
+    <div class="bezel"><div class="stage"><div class="tv" id="s-connect">
+      <div class="win" id="connectBg"></div>
+      <div class="glow" style="--glow:#E9B676"></div>
+      <div class="left">
+        <h3 class="kai">连接家里的电脑</h3>
+        <p class="sub">电视和电脑连在同一个 Wi-Fi 下，就会出现在这里</p>
+        <div class="focus-group">
+          <div class="dev" data-f data-default data-name="LI-PC">
+            <div class="ico"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#EFE6D6" stroke-width="1.6"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg></div>
+            <div><div class="t">LI-PC · 192.168.1.5</div><div class="m">需要配对，端口 8686</div></div>
+            <div class="st">配对中</div>
+          </div>
+          <div class="dev" data-f data-name="书房 NAS">
+            <div class="ico"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#EFE6D6" stroke-width="1.6"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 7h8M8 11h8"/><circle cx="12" cy="17" r="1"/></svg></div>
+            <div><div class="t">书房 NAS · 192.168.1.20</div><div class="m">上次连接：10 月 3 日</div></div>
+          </div>
+          <div class="dev manual" data-f data-name="手动输入">
+            <div class="ico"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#EFE6D6" stroke-width="1.6"><path d="M12 5v14M5 12h14"/></svg></div>
+            <div><div class="t">手动输入 IP 地址</div><div class="m">找不到电脑时使用</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="pair">
+        <h4 class="kai">配对 <span id="pairName">LI-PC</span></h4>
+        <p class="hint">在电脑的管理页上找到 6 位配对码</p>
+        <div class="code" id="code"></div>
+        <div class="pad focus-group" id="pad"></div>
+        <div class="cast">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#E9B676" stroke-width="1.5"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>
+          <b>或者用手机投送</b>
+          在已配对的手机上打开“投送到电视”
+          <div class="dots" style="margin-top:14px"><i></i><i></i><i></i></div>
+        </div>
+      </div>
+      <div class="toast"></div>
+      <div class="safe"></div>
+    </div></div></div>
+  </section>
+
+  <!-- ============ 2 首页 ============ -->
+  <section class="screen" data-screen="home">
+    <div class="cap"><h2>首页：待机画报</h2><p>相册照片缓慢平移、交替淡入，左下的环境光随时间漂移，并取焦点卡片的颜色。无操作 8 秒界面隐退，按任意键浮现。</p>
+      <div class="acts"><button class="tbtn" id="idleBtn">立即进入待机</button></div></div>
+    <div class="bezel"><div class="stage"><div class="tv" id="s-home">
+      <div id="homePhotos"></div>
+      <div class="shade"></div>
+      <div class="drift"></div>
+      <div class="glow"></div>
+      <div class="clock"><div class="num" id="clk">21:40</div><div class="kai" id="dte">十一月二十日，星期五</div></div>
+      <div class="conn"><i></i>LI-PC 已连接</div>
+      <div class="rows">
+        <div class="row"><h5>继续观看</h5>
+          <div class="track focus-group">
+            <div class="cw" data-f data-default data-hue="#6E7FB8">
+              <div class="th" data-ep="12"><div class="bar"><i style="width:70%"></i></div></div>
+              <div class="t">星海旅人 第 12 集</div><div class="m">还剩 6 分钟</div>
+            </div>
+            <div class="cw" data-f data-hue="#7E8F8A">
+              <div class="th" data-film="fog"><div class="bar"><i style="width:58%"></i></div></div>
+              <div class="t">雾港往事</div><div class="m">看到 1:12:40，共 2:05:10</div>
+            </div>
+          </div>
+        </div>
+        <div class="row"><h5>共享文件夹</h5>
+          <div class="track focus-group" id="folders"></div>
+        </div>
+        <div class="row" data-deep><h5>最近添加</h5>
+          <div class="track focus-group">
+            <div class="rc" data-f data-hue="#9C7FB0"><div class="th" data-ep="13"></div><div class="t">星海旅人 第 13 集 归途</div><div class="m">今天加入动漫</div></div>
+            <div class="rc" data-f data-hue="#E0A37A"><div class="th" data-photo="0"></div><div class="t">相册新增 36 张</div><div class="m">E:\Photos\2025</div></div>
+            <div class="rc" data-f data-hue="#7E8F8A"><div class="th" data-film="fog"></div><div class="t">雾港往事</div><div class="m">昨天加入电影</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="idlecap"><div class="kai" id="idleTitle">海边的傍晚</div><div class="dim" id="idleMeta">2025 年 6 月 12 日 18:30，来自相册</div></div>
+      <div class="toast"></div>
+      <div class="safe"></div>
+    </div></div></div>
+  </section>
+
+  <!-- ============ 2b 输入密码（首页长按菜单键） ============ -->
+  <section class="screen" data-screen="pin">
+    <div class="cap"><h2>输入密码</h2><p>首页长按遥控器“菜单”键弹出，界面上没有任何入口（演示：在首页画框按住 M 约 1 秒）。遥控器数字键直接输入，或方向键选键后按确认；4–16 位。确认后统一等待约 0.8 秒，密码不对和没有加密片库时表现一样：只清空，不提示。演示密码 0000。</p></div>
+    <div class="bezel"><div class="stage"><div class="tv" id="s-pin">
+      <div class="pinbg" id="pinBg"></div>
+      <div class="glow" style="--glow:#E9B676"></div>
+      <div class="dlg">
+        <h4 class="kai">输入密码</h4>
+        <p class="hint">用遥控器数字键，或选中下方数字后按确认</p>
+        <div class="pw" id="pw"></div>
+        <div class="pad focus-group" id="pinPad"></div>
+      </div>
+      <div class="toast"></div>
+      <div class="safe"></div>
+    </div></div></div>
+  </section>
+
+  <!-- ============ 2c 解锁后的首页 ============ -->
+  <section class="screen" data-screen="vhome">
+    <div class="cap"><h2>解锁后的首页</h2><p>共享文件夹行多出“工作资料”，与普通片库同款，只在项目数后有一个极淡的小圆圈；最近添加合并它的新文件。画报轮播仍只取相册照片。按 Home 回到桌面、电视待机、或空闲 10 分钟，都会自动上锁，回到首页时它已消失，不提示原因（演示：H 键模拟 Home）。</p>
+      <div class="acts"><button class="tbtn" id="vHomeBtn">按 Home / 待机</button><button class="tbtn" id="vIdleBtn">空闲 10 分钟</button></div></div>
+    <div class="bezel"><div class="stage"><div class="tv" id="s-vhome">
+      <div id="vPhotos"></div>
+      <div class="shade"></div>
+      <div class="drift"></div>
+      <div class="glow"></div>
+      <div class="clock"><div class="num" id="vClk">21:40</div><div class="kai" id="vDte">十一月二十日，星期五</div></div>
+      <div class="conn"><i></i>LI-PC 已连接</div>
+      <div class="rows">
+        <div class="row"><h5>继续观看</h5>
+          <div class="track focus-group">
+            <div class="cw" data-f data-hue="#6E7FB8">
+              <div class="th" data-ep="12"><div class="bar"><i style="width:70%"></i></div></div>
+              <div class="t">星海旅人 第 12 集</div><div class="m">还剩 6 分钟</div>
+            </div>
+            <div class="cw" data-f data-hue="#7E8F8A">
+              <div class="th" data-film="fog"><div class="bar"><i style="width:58%"></i></div></div>
+              <div class="t">雾港往事</div><div class="m">看到 1:12:40，共 2:05:10</div>
+            </div>
+          </div>
+        </div>
+        <div class="row"><h5>共享文件夹</h5>
+          <div class="track focus-group" id="vFolders"></div>
+        </div>
+        <div class="row" data-deep><h5>最近添加</h5>
+          <div class="track focus-group">
+            <div class="rc" data-f data-hue="#9C7FB0"><div class="th" data-ep="13"></div><div class="t">星海旅人 第 13 集 归途</div><div class="m">今天加入动漫</div></div>
+            <div class="rc" data-f data-hue="#E0A37A"><div class="th" data-photo="0"></div><div class="t">相册新增 36 张</div><div class="m">E:\Photos\2025</div></div>
+            <div class="rc" data-f data-hue="#7E8F8A"><div class="th" data-film="fog"></div><div class="t">雾港往事</div><div class="m">昨天加入电影</div></div>
+            <div class="rc vx" data-f data-hue="#B9AE9A"><div class="th" data-film="doc"></div><div class="t">家庭预算 2025.xlsx</div><div class="m">工作资料</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="desk"></div>
+      <div class="toast"></div>
+      <div class="safe"></div>
+    </div></div></div>
+  </section>
+
+  <!-- ============ 3 文件夹浏览 ============ -->
+  <section class="screen" data-screen="folder">
+    <div class="cap"><h2>文件夹浏览</h2><p>左侧是焦点详情，右侧剧集网格随焦点滚动。字幕不占卡片，只在详情里说明；poster.jpg、tvshow.nfo 直接收起。</p></div>
+    <div class="bezel"><div class="stage"><div class="tv" id="s-folder">
+      <div class="bgposter" id="bgPoster"></div>
+      <div class="glow"></div>
+      <div class="crumb kai"><span>动漫</span><em>/</em><span>星海旅人</span><em>/</em>第一季</div>
+      <div class="sort" data-f>按集数排序</div>
+      <div class="detail">
+        <div class="post" id="poster"></div>
+        <h6 id="dTitle">第 12 集 灯塔</h6>
+        <div class="m" id="dMeta">24:10，看到 17:00，还剩 6 分钟</div>
+        <div class="bar" id="dBar"><i style="width:70%"></i></div>
+        <div class="file" id="dFile"><b>星海旅人 S01E12 灯塔.mkv</b><br>已找到中文字幕，播放时自动加载<br>已看 11 集，共 13 集</div>
+      </div>
+      <div class="gridvp"><div class="grid focus-group" id="grid"></div></div>
+      <div class="toast"></div>
+      <div class="safe"></div>
+    </div></div></div>
+  </section>
+
+  <!-- ============ 4 视频播放 ============ -->
+  <section class="screen" data-screen="video">
+    <div class="cap"><h2>视频播放</h2><p>按确认或菜单键呼出控制条，下移进入选集行。片尾自动下一集：焦点默认在“立即播放”，按返回取消。</p>
+      <div class="acts"><button class="tbtn" id="vBar" aria-pressed="false">控制条</button><button class="tbtn" id="vEnd" aria-pressed="true">片尾下一集</button></div></div>
+    <div class="bezel"><div class="stage"><div class="tv ending" id="s-video">
+      <div class="scene" id="vScene"></div>
+      <div class="ctl">
+        <div class="ttl"><div class="kai">星海旅人 第 12 集 灯塔</div><div class="dim">中文字幕已加载</div></div>
+        <div class="prog"><div class="bar"><i style="width:70%"></i><b></b></div><div class="tc"><span>17:00</span><span class="dim">还剩 6 分钟，共 24:10</span></div></div>
+        <div class="btns focus-group">
+          <div class="pill play" data-f data-default data-k="play"><svg width="26" height="26" viewBox="0 0 24 24" fill="#EFE6D6"><rect x="5" y="4" width="5" height="16" rx="1"/><rect x="14" y="4" width="5" height="16" rx="1"/></svg></div>
+          <div class="pill" data-f>字幕<span class="dim">中文</span></div>
+          <div class="pill" data-f>音轨<span class="dim">日语</span></div>
+          <div class="pill" data-f>倍速<span class="dim">1.0 倍</span></div>
+          <div class="pill" data-f>画面比例<span class="dim">原始</span></div>
+        </div>
+        <div class="epvp"><div class="eprow focus-group" id="eprow"></div></div>
+      </div>
+      <div class="end">
+        <div class="credits" id="credits"></div>
+        <div class="next">
+          <div class="row1">
+            <div class="th" data-ep="13"></div>
+            <div class="in"><span id="cdText">5 秒后播放</span><span class="kai">第 13 集 · 归途</span></div>
+          </div>
+          <div class="acts focus-group">
+            <div class="ring"><svg width="96" height="96"><circle cx="48" cy="48" r="42" fill="none" stroke="rgba(239,230,214,.15)" stroke-width="6"/><circle class="p" id="ringP" cx="48" cy="48" r="42" fill="none" stroke="#E9B676" stroke-width="6" stroke-linecap="round" stroke-dasharray="263.9" stroke-dashoffset="0"/></svg><div class="n" id="cdNum">5</div></div>
+            <div class="pill go" data-f data-k="now">立即播放</div>
+            <div class="pill" data-f data-k="stay">留在本集</div>
+            <span class="back">按返回取消</span>
+          </div>
+        </div>
+      </div>
+      <div class="toast"></div>
+      <div class="safe"></div>
+    </div></div></div>
+  </section>
+
+  <!-- ============ 5 图片查看 ============ -->
+  <section class="screen" data-screen="photo">
+    <div class="cap"><h2>图片查看与幻灯片</h2><p>4:3 照片两侧用模糊延展填满，不留黑边。左右键切换；幻灯片播放时界面全部隐退，只留顶部一条细进度。</p></div>
+    <div class="bezel"><div class="stage"><div class="tv" id="s-photo">
+      <div class="blurbg" id="pBlur"></div>
+      <div class="img" id="pImg" data-f data-default></div>
+      <div class="sprog"></div>
+      <div class="chrome">
+        <div class="top"><div><div class="kai" id="pTitle">海边的傍晚</div><div class="dim" id="pName">IMG_20250612_183015.jpg</div></div><div class="dim" id="pIdx">1 / 6</div></div>
+        <div class="chev l"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#EFE6D6" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></div>
+        <div class="chev r"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#EFE6D6" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg></div>
+        <dl class="info" id="pInfo"></dl>
+        <div class="bottom"></div>
+        <div class="strip" id="pStrip"></div>
+        <div class="pbtns focus-group">
+          <div class="pill" data-f data-k="show"><svg width="22" height="22" viewBox="0 0 24 24" fill="#EFE6D6"><path d="M7 4l13 8-13 8z"/></svg>幻灯片播放</div>
+          <div class="pill" data-f data-k="info">隐藏信息</div>
+        </div>
+      </div>
+      <div class="phint">幻灯片播放中，按任意键停止</div>
+      <div class="toast"></div>
+      <div class="safe"></div>
+    </div></div></div>
+  </section>
+</div>
+
+<script>
+/* ---------------- 生成图像（内联 SVG） ---------------- */
+function rnd(seed){let s=seed;return()=>((s=(s*9301+49297)%233280)/233280)}
+const PHOTOS=[
+ {k:'sea',title:'海边的傍晚',name:'IMG_20250612_183015.jpg',time:'2025-06-12 18:30',size:'4032 × 3024',mb:'4.8 MB',hue:'#E0A37A'},
+ {k:'city',title:'窗外的楼群',name:'IMG_20250612_214402.jpg',time:'2025-06-12 21:44',size:'4032 × 3024',mb:'3.9 MB',hue:'#7C8DB5'},
+ {k:'lake',title:'清晨的湖',name:'IMG_20250503_061122.jpg',time:'2025-05-03 06:11',size:'4032 × 3024',mb:'5.2 MB',hue:'#A9B7B4'},
+ {k:'snow',title:'下雪的街口',name:'IMG_20250118_174530.jpg',time:'2025-01-18 17:45',size:'4032 × 3024',mb:'4.1 MB',hue:'#9AA3BE'},
+ {k:'lamp',title:'客厅的灯',name:'IMG_20250301_212008.jpg',time:'2025-03-01 21:20',size:'3024 × 4032',mb:'3.6 MB',hue:'#E9B676'},
+ {k:'field',title:'麦田与云',name:'IMG_20250720_064512.jpg',time:'2025-07-20 06:45',size:'4032 × 3024',mb:'5.0 MB',hue:'#C9A77A'}
+];
+function photoSVG(k){
+  const r=rnd(k.length*97+7);let s='';
+  const W=400,H=300;
+  if(k==='sea'){
+    s=`<defs><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2E3557"/><stop offset=".45" stop-color="#8C6A86"/><stop offset=".75" stop-color="#E7A979"/><stop offset="1" stop-color="#F3C58F"/></linearGradient>
+    <linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6A5A73"/><stop offset="1" stop-color="#1F2538"/></linearGradient>
+    <radialGradient id="c"><stop offset="0" stop-color="#FFE2B0"/><stop offset=".35" stop-color="#F6C48C" stop-opacity=".8"/><stop offset="1" stop-color="#F6C48C" stop-opacity="0"/></radialGradient></defs>
+    <rect width="400" height="190" fill="url(#a)"/><circle cx="250" cy="178" r="60" fill="url(#c)"/><circle cx="250" cy="180" r="13" fill="#FFE6BC"/>
+    <path d="M0 170 Q60 150 120 168 T230 186 L230 190 L0 190Z" fill="#3A3550"/>
+    <rect y="186" width="400" height="114" fill="url(#b)"/>`;
+    for(let i=0;i<14;i++){const y=192+i*7,w=40-i*2.2;s+=`<rect x="${250-w/2+(r()-.5)*10}" y="${y}" width="${w}" height="1.6" fill="#F6C48C" opacity="${.7-i*.045}"/>`}
+    s+=`<path d="M0 300 L0 262 Q80 250 150 270 Q210 286 260 300Z" fill="#171B29" opacity=".85"/>`;
+  }else if(k==='city'){
+    s=`<defs><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1B2236"/><stop offset="1" stop-color="#3D4767"/></linearGradient></defs><rect width="400" height="300" fill="url(#a)"/>`;
+    let x=0;while(x<400){const w=30+r()*40,h=80+r()*150;s+=`<rect x="${x}" y="${300-h}" width="${w}" height="${h}" fill="#20263A"/>`;
+      for(let yy=300-h+8;yy<296;yy+=11)for(let xx=x+5;xx<x+w-6;xx+=9) if(r()>.62) s+=`<rect x="${xx}" y="${yy}" width="4" height="5" fill="${r()>.3?'#E9B676':'#C98F8A'}" opacity="${.5+r()*.5}"/>`;
+      x+=w+3}
+    s+=`<rect x="0" y="0" width="400" height="300" fill="none" stroke="#2A2230" stroke-width="16"/><rect x="196" y="0" width="8" height="300" fill="#2A2230"/>`;
+  }else if(k==='lake'){
+    s=`<defs><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A9B9C4"/><stop offset="1" stop-color="#E8D9BF"/></linearGradient></defs><rect width="400" height="300" fill="url(#a)"/>
+    <path d="M0 150 L70 95 L130 140 L200 80 L280 135 L340 100 L400 140 L400 175 L0 175Z" fill="#8193A2"/>
+    <path d="M0 165 L90 125 L170 160 L260 120 L400 165 L400 180 L0 180Z" fill="#5C6E7F"/>
+    <rect y="178" width="400" height="122" fill="#A8B5BC"/><path d="M0 178 L90 205 L170 182 L260 210 L400 178Z" fill="#6F8090" opacity=".5"/>
+    <rect y="250" width="400" height="50" fill="#56616A" opacity=".5"/>`;
+  }else if(k==='snow'){
+    s=`<defs><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3B4660"/><stop offset="1" stop-color="#7D8AA5"/></linearGradient><radialGradient id="g"><stop offset="0" stop-color="#F3C58F" stop-opacity=".9"/><stop offset="1" stop-color="#F3C58F" stop-opacity="0"/></radialGradient></defs>
+    <rect width="400" height="300" fill="url(#a)"/><rect x="30" y="90" width="110" height="160" fill="#2B3247"/><rect x="250" y="70" width="130" height="180" fill="#2B3247"/>
+    <rect x="56" y="140" width="22" height="30" fill="#E9B676" opacity=".8"/><rect x="290" y="120" width="22" height="30" fill="#E9B676" opacity=".7"/>
+    <circle cx="200" cy="120" r="70" fill="url(#g)"/><rect x="198" y="120" width="4" height="130" fill="#1E2433"/><circle cx="200" cy="118" r="6" fill="#FFE6BC"/>
+    <path d="M0 250 Q200 236 400 250 L400 300 L0 300Z" fill="#C9CEDA"/>`;
+    for(let i=0;i<120;i++) s+=`<circle cx="${r()*400}" cy="${r()*300}" r="${.6+r()*1.6}" fill="#EFF1F6" opacity="${.4+r()*.5}"/>`;
+  }else if(k==='lamp'){
+    s=`<defs><radialGradient id="g" cx=".3" cy=".45"><stop offset="0" stop-color="#E9B676" stop-opacity=".85"/><stop offset=".6" stop-color="#6B4B3E" stop-opacity=".4"/><stop offset="1" stop-color="#2E2A3A" stop-opacity="0"/></radialGradient></defs>
+    <rect width="400" height="300" fill="#3A302F"/><rect width="400" height="300" fill="url(#g)"/>
+    <path d="M90 70 L150 70 L170 130 L70 130Z" fill="#F2CD95"/><rect x="118" y="130" width="4" height="120" fill="#1E1A1F"/><rect x="95" y="248" width="50" height="6" rx="3" fill="#1E1A1F"/>
+    <path d="M190 190 Q190 165 215 165 L355 165 Q380 165 380 190 L380 250 L190 250Z" fill="#4E4A5C"/><rect x="200" y="200" width="170" height="40" rx="10" fill="#5D586C"/>
+    <rect x="0" y="252" width="400" height="48" fill="#2A2421"/><rect x="250" y="40" width="90" height="70" fill="#2A2230" stroke="#6B5A4E" stroke-width="4"/>`;
+  }else{
+    s=`<defs><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8FA3C0"/><stop offset=".6" stop-color="#E9C9A0"/><stop offset="1" stop-color="#F0D7AE"/></linearGradient></defs>
+    <rect width="400" height="300" fill="url(#a)"/><ellipse cx="120" cy="70" rx="90" ry="20" fill="#F4E6D2" opacity=".7"/><ellipse cx="300" cy="105" rx="70" ry="14" fill="#F4E6D2" opacity=".6"/>
+    <path d="M0 180 Q200 165 400 182 L400 300 L0 300Z" fill="#C79A5E"/>`;
+    for(let i=0;i<60;i++){const y=190+r()*110;s+=`<path d="M${r()*400} ${y} q2 -8 4 0" stroke="#9C7443" stroke-width="1.4" fill="none" opacity=".7"/>`}
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" width="100%" height="100%">${s}</svg>`;
+}
+const EPN=['启航','星图','回声','冰原','信标','潮汐','失重','远光','旧港','风暴眼','守望','灯塔','归途'];
+const EPD=['23:52','24:08','23:40','24:12','24:02','23:58','24:10','24:06','23:46','24:14','24:00','24:10','24:20'];
+function epHue(n){return 222+n*8}
+function epSVG(n){
+  const r=rnd(n*131+3),h=epHue(n);let s=`<defs><linearGradient id="e${n}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${h} 38% 14%)"/><stop offset="1" stop-color="hsl(${h+20} 32% 30%)"/></linearGradient>
+  <radialGradient id="p${n}" cx=".35" cy=".35"><stop offset="0" stop-color="hsl(${h+(n%2?60:-150)} 45% 72%)"/><stop offset="1" stop-color="hsl(${h+(n%2?40:-170)} 35% 30%)"/></radialGradient></defs>
+  <rect width="320" height="180" fill="url(#e${n})"/>`;
+  for(let i=0;i<40;i++) s+=`<circle cx="${r()*320}" cy="${r()*180}" r="${r()*1.2+.3}" fill="#EFE6D6" opacity="${.3+r()*.6}"/>`;
+  const px=60+r()*200,py=50+r()*60,pr=22+r()*40;
+  s+=`<circle cx="${px}" cy="${py}" r="${pr}" fill="url(#p${n})"/>`;
+  if(n===12) s+=`<rect x="236" y="70" width="10" height="70" fill="#2A2230"/><path d="M230 70 L252 70 L246 58 L236 58Z" fill="#2A2230"/><circle cx="241" cy="64" r="22" fill="#F3C58F" opacity=".35"/><circle cx="241" cy="64" r="4" fill="#FFE6BC"/>`;
+  s+=`<path d="M0 ${150+r()*10} Q160 ${130+r()*20} 320 ${150+r()*10} L320 180 L0 180Z" fill="hsl(${h} 30% 10%)" opacity=".85"/>`;
+  return `<svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" width="100%" height="100%">${s}</svg>`;
+}
+function posterSVG(){
+  return `<svg viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice" width="100%" height="100%"><defs><linearGradient id="pp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1F2744"/><stop offset="1" stop-color="#5E4A6E"/></linearGradient><radialGradient id="pl" cx=".4" cy=".4"><stop offset="0" stop-color="#E9C9A0"/><stop offset="1" stop-color="#8C6A86"/></radialGradient></defs>
+  <rect width="200" height="300" fill="url(#pp)"/>${Array.from({length:50},(_, i)=>{const r=rnd(i+9);return `<circle cx="${r()*200}" cy="${r()*300}" r="${r()*1.2+.3}" fill="#EFE6D6" opacity=".6"/>`}).join('')}
+  <circle cx="70" cy="200" r="64" fill="url(#pl)"/><path d="M0 260 Q100 240 200 262 L200 300 L0 300Z" fill="#141826"/>
+  <text x="160" y="40" font-family="KaiTi,STKaiti,serif" font-size="34" fill="#EFE6D6" writing-mode="tb" letter-spacing="6">星海旅人</text>
+  <text x="122" y="42" font-family="Microsoft YaHei UI,sans-serif" font-size="12" fill="#E9B676" writing-mode="tb" letter-spacing="3">第一季</text></svg>`;
+}
+function filmSVG(k){
+  if(k==='fog') return `<svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" width="100%" height="100%"><defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5C6B6E"/><stop offset="1" stop-color="#2B3340"/></linearGradient></defs><rect width="320" height="180" fill="url(#fg)"/><rect x="40" y="70" width="8" height="70" fill="#1E2433"/><circle cx="44" cy="68" r="18" fill="#E9B676" opacity=".35"/><circle cx="44" cy="68" r="4" fill="#F3D4A4"/><path d="M120 120 L260 120 L250 140 L130 140Z" fill="#1E2433"/><rect x="180" y="80" width="4" height="40" fill="#1E2433"/><rect y="110" width="320" height="70" fill="#9DAAAA" opacity=".25"/><rect y="140" width="320" height="40" fill="#1E2433" opacity=".6"/></svg>`;
+  return `<svg viewBox="0 0 320 180" width="100%" height="100%"><rect width="320" height="180" fill="#3A3646"/><rect x="110" y="26" width="100" height="128" rx="6" fill="#EFE6D6" opacity=".9"/><g fill="#8D93A6">${[0,1,2,3,4,5].map(i=>`<rect x="124" y="${46+i*16}" width="${i%3?72:50}" height="6" rx="3"/>`).join('')}</g></svg>`;
+}
+document.querySelectorAll('[data-ep]').forEach(e=>e.insertAdjacentHTML('afterbegin',epSVG(+e.dataset.ep)));
+document.querySelectorAll('[data-photo]').forEach(e=>e.insertAdjacentHTML('afterbegin',photoSVG(PHOTOS[+e.dataset.photo].k)));
+document.querySelectorAll('[data-film]').forEach(e=>e.insertAdjacentHTML('afterbegin',filmSVG(e.dataset.film)));
+
+/* ---------------- 缩放与屏幕激活 ---------------- */
+function fit(){document.querySelectorAll('.stage').forEach(s=>s.style.setProperty('--s',s.clientWidth/1920))}
+addEventListener('resize',fit);fit();
+let active=null;
+function activate(sec){document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s===sec));active=sec}
+document.querySelectorAll('.screen').forEach(sec=>sec.querySelector('.stage').addEventListener('click',()=>{activate(sec);hooks[sec.dataset.screen]?.wake?.()}));
+document.getElementById('safeBtn').onclick=e=>{const on=document.body.classList.toggle('show-safe');e.target.setAttribute('aria-pressed',on);e.target.textContent=on?'隐藏安全区':'显示安全区'};
+
+function toast(tv,msg){const t=tv.querySelector('.toast');t.textContent=msg;t.classList.add('on');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('on'),2200)}
+
+/* ---------------- 焦点引擎（空间导航） ---------------- */
+const hooks={};
+function shown(e){return e.offsetParent!==null && getComputedStyle(e).visibility!=='hidden'}
+function setFocus(tv,el){
+  tv.querySelectorAll('.is-focus').forEach(x=>x.classList.remove('is-focus'));
+  el.classList.add('is-focus');
+  const key=tv.closest('.screen').dataset.screen;hooks[key]?.focus?.(el,tv);
+}
+function nav(tv,dir){
+  const cur=tv.querySelector('.is-focus');if(!cur)return;
+  const r=cur.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;
+  let best=null,bs=1e9;
+  tv.querySelectorAll('[data-f]').forEach(e=>{
+    if(e===cur||!shown(e))return;
+    const q=e.getBoundingClientRect(),x=q.left+q.width/2,y=q.top+q.height/2;let d,p;
+    if(dir==='right'){d=x-cx;p=y-cy}else if(dir==='left'){d=cx-x;p=y-cy}else if(dir==='down'){d=y-cy;p=x-cx}else{d=cy-y;p=x-cx}
+    if(d<=4)return;const sc=d+Math.abs(p)*2.2;if(sc<bs){bs=sc;best=e}
+  });
+  if(best)setFocus(tv,best);
+}
+function keep(track,el,axis,pad=40){
+  const vp=track.parentElement,pos=axis==='x'?el.offsetLeft:el.offsetTop,size=axis==='x'?el.offsetWidth:el.offsetHeight,view=axis==='x'?vp.clientWidth:vp.clientHeight;
+  let off=+track.dataset.off||0;
+  if(pos+size-off>view-pad)off=pos+size-view+pad;
+  if(pos-off<pad/2)off=Math.max(0,pos-pad/2);
+  track.dataset.off=off;track.style.transform=axis==='x'?`translateX(${-off}px)`:`translateY(${-off}px)`;
+}
+const DIR={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'};
+addEventListener('keydown',ev=>{
+  if(!active){const mid=innerHeight/2;let b=null,bd=1e9;document.querySelectorAll('.screen').forEach(s=>{const r=s.getBoundingClientRect(),d=Math.abs(r.top+r.height/2-mid);if(d<bd){bd=d;b=s}});activate(b)}
+  const tv=active.querySelector('.tv'),key=active.dataset.screen,h=hooks[key]||{};
+  const k=DIR[ev.key]?DIR[ev.key]:ev.key==='Enter'?'ok':(ev.key==='Escape'||ev.key==='Backspace')?'back':(ev.key==='m'||ev.key==='M'||ev.key==='ContextMenu')?'menu':null;
+  if(!k)return;ev.preventDefault();
+  if(h.key&&h.key(k,tv))return;
+  if(DIR[ev.key])nav(tv,k);
+  else if(k==='ok'){const f=tv.querySelector('.is-focus');h.ok?.(f,tv)}
+});
+function initFocus(tv){const d=tv.querySelector('[data-default]');if(d)setFocus(tv,d)}
+
+/* ---------------- 1 连接电脑 ---------------- */
+(function(){
+  const tv=document.getElementById('s-connect');
+  document.getElementById('connectBg').innerHTML=`<div style="position:absolute;inset:0;opacity:.5">${photoSVG('city')}</div><div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(28,34,48,.96) 40%,rgba(28,34,48,.7))"></div>`;
+  let code='482';
+  const codeEl=document.getElementById('code'),pad=document.getElementById('pad');
+  function draw(){codeEl.innerHTML=Array.from({length:6},(_,i)=>`<span class="${i===code.length?'cur':''}">${code[i]||''}</span>`).join('')}
+  draw();
+  pad.innerHTML=['1','2','3','4','5','6','7','8','9','删除','0','确认'].map(k=>`<button data-f data-k="${k}" class="${k.length>1?'w':''} ${k==='确认'?'ok':''}" tabindex="-1">${k}</button>`).join('');
+  pad.querySelector('[data-k="5"]').setAttribute('data-default','');
+  tv.querySelector('.dev[data-default]').removeAttribute('data-default');
+  hooks.connect={ok(f){
+    if(f.classList.contains('dev')){document.getElementById('pairName').textContent=f.dataset.name==='手动输入'?'新的电脑':f.dataset.name;toast(tv,f.dataset.name==='手动输入'?'用数字键输入 IP 地址':'正在连接 '+f.dataset.name);return}
+    const k=f.dataset.k;
+    if(k==='删除')code=code.slice(0,-1);
+    else if(k==='确认'){if(code.length<6){toast(tv,'还差 '+(6-code.length)+' 位');return}toast(tv,'配对成功，正在打开首页');setTimeout(()=>{code='';draw()},2400)}
+    else if(code.length<6)code+=k;
+    draw();
+  }};
+  initFocus(tv);
+})();
+
+/* ---------------- 2 首页 ---------------- */
+// 第 5 项为 true 的是加密片库：锁定时首页不出现，只在 2c 解锁后出现
+const SHARES=[['电影','386 项','#B07A5E','<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M3 9h18M8 5v4M16 5v4"/>'],
+           ['动漫','2,140 项','#6E7FB8','<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.5 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/>'],
+           ['相册','9,512 项','#C99A6A','<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M3 16l5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.5"/>'],
+           ['工作资料','48 项','#8A9A86','<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',true]];
+(function(){
+  const tv=document.getElementById('s-home');
+  const F=SHARES.filter(f=>!f[4]);
+  document.getElementById('folders').innerHTML=F.map(f=>`<div class="fd" data-f data-hue="${f[2]}" style="--c:${f[2]}"><div class="top"><span class="t">${f[0]}</span><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#EFE6D6" stroke-width="1.5" opacity=".8">${f[3]}</svg></div><span class="m">${f[1]}</span></div>`).join('');
+  // 画报照片轮换
+  const order=[0,3,1];
+  document.getElementById('homePhotos').innerHTML=order.map((i,n)=>`<div class="photo ${n?'':'on'}" data-i="${i}">${photoSVG(PHOTOS[i].k)}</div>`).join('');
+  const ph=[...tv.querySelectorAll('.photo')];let pi=0;
+  const months=['一','二','三','四','五','六','七','八','九','十','十一','十二'];
+  setInterval(()=>{ph[pi].classList.remove('on');pi=(pi+1)%ph.length;ph[pi].classList.add('on');
+    const p=PHOTOS[+ph[pi].dataset.i],[d,t]=p.time.split(' '),[y,m,dd]=d.split('-');
+    document.getElementById('idleTitle').textContent=p.title;
+    document.getElementById('idleMeta').textContent=`${y} 年 ${+m} 月 ${+dd} 日 ${t}，来自相册`;
+    if(tv.classList.contains('idle'))tv.style.setProperty('--glow',p.hue);
+  },16000);
+  // 时钟
+  function clock(){const n=new Date();document.getElementById('clk').textContent=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+    document.getElementById('dte').textContent=`${months[n.getMonth()]}月${cn(n.getDate())}日，星期${'日一二三四五六'[n.getDay()]}`}
+  function cn(d){const a='〇一二三四五六七八九';if(d<=10)return d===10?'十':a[d];if(d<20)return '十'+a[d-10];return a[Math.floor(d/10)]+'十'+(d%10?a[d%10]:'')}
+  clock();setInterval(clock,20000);
+  // 待机
+  let timer;
+  function arm(){clearTimeout(timer);timer=setTimeout(()=>sleep(),8000)}
+  function sleep(){tv.classList.add('idle');tv.style.setProperty('--glow',PHOTOS[+ph[pi].dataset.i].hue)}
+  function wake(){const was=tv.classList.contains('idle');tv.classList.remove('idle');const f=tv.querySelector('.is-focus');if(f)tv.style.setProperty('--glow',f.dataset.hue);arm();return was}
+  document.getElementById('idleBtn').onclick=()=>{clearTimeout(timer);sleep()};
+  hooks.home={
+    wake,
+    key(k){return wake()},           // 待机时按键只唤醒，不执行
+    focus(el){tv.style.setProperty('--glow',el.dataset.hue);tv.classList.toggle('deep',!!el.closest('[data-deep]'))},
+    ok(f){toast(tv,'打开 '+f.querySelector('.t').textContent)}
+  };
+  initFocus(tv);arm();
+})();
+
+/* ---------------- 2b 输入密码（长按菜单键） ---------------- */
+const pin=(function(){
+  const tv=document.getElementById('s-pin'),pw=document.getElementById('pw'),pad=document.getElementById('pinPad');
+  document.getElementById('pinBg').innerHTML=photoSVG(PHOTOS[0].k);
+  pad.innerHTML=['1','2','3','4','5','6','7','8','9','删除','0','确认'].map(k=>`<button data-f data-k="${k}" class="${k.length>1?'w':''} ${k==='确认'?'ok':''}" tabindex="-1">${k}</button>`).join('');
+  pad.querySelector('[data-k="5"]').setAttribute('data-default','');
+  let val='',busy=false,from=null;
+  function draw(){pw.innerHTML='<i></i>'.repeat(val.length)+'<b></b>'}
+  function go(sec){activate(sec);sec.scrollIntoView({behavior:'smooth',block:'center'})}
+  function type(d,jump){if(busy||val.length>=16)return;val+=d;draw();if(jump)setFocus(tv,pad.querySelector('[data-k="确认"]'))}
+  // 所有密码都走同一条路径、同样的等待；不对只清空，界面上不出现任何错误提示
+  function submit(){busy=true;pw.classList.add('busy');
+    setTimeout(()=>{const ok=val==='0000';val='';busy=false;pw.classList.remove('busy');draw();initFocus(tv);
+      if(ok){vault.unlock();go(document.getElementById('s-vhome').closest('.screen'))}},800)}
+  hooks.pin={
+    key(k){if(busy)return true;if(k==='back'){val='';draw();go(from||document.getElementById('s-home').closest('.screen'));return true}return false},
+    ok(f){const k=f.dataset.k;if(k==='删除'){val=val.slice(0,-1);draw()}else if(k==='确认')submit();else type(k)}
+  };
+  draw();initFocus(tv);
+  return {type,open(src){from=src;val='';draw();initFocus(tv);go(tv.closest('.screen'))}};
+})();
+
+/* ---------------- 2c 解锁后的首页 ---------------- */
+const vault=(function(){
+  const tv=document.getElementById('s-vhome');
+  document.getElementById('vFolders').innerHTML=SHARES.map(f=>`<div class="fd${f[4]?' vx':''}" data-f ${f[4]?'data-default':''} data-hue="${f[2]}" style="--c:${f[2]}"><div class="top"><span class="t">${f[0]}</span><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#EFE6D6" stroke-width="1.5" opacity=".8">${f[3]}</svg></div><span class="m">${f[1]}${f[4]?'<i class="vmark"></i>':''}</span></div>`).join('');
+  // 画报：与首页同一组“相册”照片，加密片库里的照片永远不进轮播
+  document.getElementById('vPhotos').innerHTML=[0,3,1].map((i,n)=>`<div class="photo ${n?'':'on'}">${photoSVG(PHOTOS[i].k)}</div>`).join('');
+  const ph=[...tv.querySelectorAll('.photo')];let pi=0;
+  setInterval(()=>{ph[pi].classList.remove('on');pi=(pi+1)%ph.length;ph[pi].classList.add('on')},16000);
+  function clock(){document.getElementById('vClk').textContent=document.getElementById('clk').textContent;document.getElementById('vDte').textContent=document.getElementById('dte').textContent}
+  clock();setInterval(clock,20000);
+  let open=true,idle;
+  function arm(){clearTimeout(idle);if(open)idle=setTimeout(()=>lock('idle'),600000)}
+  // 上锁：Home / 待机 先离开 App（暗场），空闲则原地淡出；回来时片库已消失，不提示原因
+  function lock(how){
+    if(!open)return;open=false;clearTimeout(idle);
+    tv.classList.add(how==='idle'?'fade':'away');
+    setTimeout(()=>{tv.classList.add('locked');setFocus(tv,tv.querySelector('.cw'))},600);
+    setTimeout(()=>tv.classList.remove('away','fade'),how==='idle'?900:1800);
+  }
+  function unlock(){open=true;tv.classList.remove('locked');setFocus(tv,tv.querySelector('.fd.vx'));arm()}
+  [['vHomeBtn','home'],['vIdleBtn','idle']].forEach(([id,how])=>document.getElementById(id).onclick=e=>{e.stopPropagation();activate(tv.closest('.screen'));lock(how)});
+  hooks.vhome={
+    wake:arm,
+    key(){arm();return false},
+    focus(el){tv.style.setProperty('--glow',el.dataset.hue);tv.classList.toggle('deep',!!el.closest('[data-deep]'))},
+    ok(f){toast(tv,'打开 '+f.querySelector('.t').textContent)}
+  };
+  initFocus(tv);arm();
+  return {unlock,lock,get open(){return open}};
+})();
+
+/* 遥控器：长按“菜单”约 1 秒弹出密码框；数字键直接输入；H 模拟 Home 键 */
+(function(){
+  let hold=null;
+  const isMenu=k=>k==='m'||k==='M'||k==='ContextMenu';
+  addEventListener('keydown',ev=>{
+    if(!active)return;const key=active.dataset.screen;
+    if(isMenu(ev.key)&&!ev.repeat&&(key==='home'||(key==='vhome'&&!vault.open))){const src=active;clearTimeout(hold);hold=setTimeout(()=>pin.open(src),1000)}
+    else if(key==='pin'&&/^[0-9]$/.test(ev.key)){ev.preventDefault();pin.type(ev.key,true)}
+    else if(key==='vhome'&&(ev.key==='h'||ev.key==='H'))vault.lock('home');
+  });
+  addEventListener('keyup',ev=>{if(isMenu(ev.key))clearTimeout(hold)});
+  addEventListener('blur',()=>clearTimeout(hold));
+})();
+
+/* ---------------- 3 文件夹浏览 ---------------- */
+(function(){
+  const tv=document.getElementById('s-folder'),grid=document.getElementById('grid');
+  document.getElementById('poster').innerHTML=posterSVG();
+  document.getElementById('bgPoster').innerHTML=posterSVG();
+  let html=`<div class="ep folder" data-f data-kind="folder" data-hue="#8D93A6"><div class="th"><svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="#EFE6D6" stroke-width="1.3"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></div><div class="t">Extras</div><div class="m">花絮与访谈，6 项</div></div>`;
+  for(let n=1;n<=13;n++){
+    const watched=n<=11,cur=n===12;
+    html+=`<div class="ep" data-f data-n="${n}" ${cur?'data-default':''} data-hue="hsl(${epHue(n)+20} 40% 55%)"><div class="th">${epSVG(n)}
+      ${watched?'<span class="badge">已看完</span><div class="bar done"><i style="width:100%"></i></div>':''}
+      ${cur?'<div class="bar"><i style="width:70%"></i></div>':''}
+      ${n===13?'<span class="badge new">新加入</span>':''}</div>
+      <div class="t">${n}. ${EPN[n-1]}</div><div class="m">${cur?'还剩 6 分钟':watched?'已看完，'+EPD[n-1]:EPD[n-1]}</div></div>`;
+  }
+  grid.innerHTML=html;
+  const T=document.getElementById('dTitle'),M=document.getElementById('dMeta'),B=document.getElementById('dBar'),FI=document.getElementById('dFile');
+  hooks.folder={
+    focus(el){
+      tv.style.setProperty('--glow',el.dataset.hue||'#E9B676');
+      if(el.classList.contains('sort')){return}
+      keep(grid,el,'y',120);
+      if(el.dataset.kind==='folder'){T.textContent='Extras';M.textContent='花絮与访谈，6 项';B.style.visibility='hidden';FI.innerHTML='<b>子文件夹</b><br>按确认进入';return}
+      const n=+el.dataset.n,s=String(n).padStart(2,'0');
+      T.textContent=`第 ${n} 集 ${EPN[n-1]}`;
+      B.style.visibility=n<=12?'visible':'hidden';
+      B.className='bar'+(n<=11?' done':'');B.firstElementChild.style.width=n<=11?'100%':'70%';
+      M.textContent=n<=11?`${EPD[n-1]}，已看完`:n===12?'24:10，看到 17:00，还剩 6 分钟':`${EPD[n-1]}，今天加入`;
+      FI.innerHTML=`<b>星海旅人 S01E${s} ${EPN[n-1]}.mkv</b><br>已找到中文字幕，播放时自动加载<br>已看 11 集，共 13 集`;
+    },
+    ok(f){if(f.classList.contains('sort'))toast(tv,'排序：按集数 / 按名称 / 按加入时间');else toast(tv,f.dataset.kind==='folder'?'打开 Extras':(f.dataset.n<=11?'从头播放 ':'继续播放 ')+'第 '+(f.dataset.n||'')+' 集')}
+  };
+  initFocus(tv);
+})();
+
+/* ---------------- 4 视频播放 ---------------- */
+(function(){
+  const tv=document.getElementById('s-video');
+  document.getElementById('vScene').innerHTML=(()=>{const r=rnd(77);let st='';for(let i=0;i<260;i++)st+=`<circle cx="${r()*1920}" cy="${r()*760}" r="${r()*1.8+.4}" fill="#EFE6D6" opacity="${.25+r()*.6}"/>`;
+    return `<svg viewBox="0 0 1920 1080" width="100%" height="100%"><defs><linearGradient id="vs" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1A1830"/><stop offset=".7" stop-color="#4A2A44"/><stop offset="1" stop-color="#6A3A4A"/></linearGradient>
+    <radialGradient id="vp" cx=".35" cy=".35"><stop offset="0" stop-color="#9FD0C0"/><stop offset="1" stop-color="#2E5A5A"/></radialGradient><radialGradient id="vl"><stop offset="0" stop-color="#F3C58F" stop-opacity=".55"/><stop offset="1" stop-color="#F3C58F" stop-opacity="0"/></radialGradient></defs>
+    <rect width="1920" height="1080" fill="url(#vs)"/>${st}<circle cx="1420" cy="330" r="190" fill="url(#vp)" opacity=".85"/>
+    <circle cx="900" cy="560" r="240" fill="url(#vl)"/><path d="M880 600 L920 600 L936 900 L864 900Z" fill="#1E1A2A"/><path d="M868 600 L932 600 L918 566 L882 566Z" fill="#1E1A2A"/><circle cx="900" cy="580" r="10" fill="#FFE6BC"/>
+    <path d="M0 900 Q520 860 960 890 T1920 880 L1920 1080 L0 1080Z" fill="#191626"/></svg>`})();
+  document.getElementById('credits').innerHTML=['导演','林知远','','脚本','周以宁','','美术','宋晚','沈一帆','','音乐','白屿','','配音','陈默','苏可','','制作','星海旅人制作委员会'].map(x=>x||'&nbsp;').join('<br>');
+  const row=document.getElementById('eprow');
+  row.innerHTML=Array.from({length:13},(_,i)=>{const n=i+1;return `<div class="mini ${n===12?'now':''}" data-f data-n="${n}"><div class="th">${epSVG(n)}${n<=11?'<div class="bar done"><i style="width:100%"></i></div>':n===12?'<div class="bar"><i style="width:70%"></i></div>':''}</div><div class="t">${n===12?'正在播放':n+'. '+EPN[i]}</div></div>`}).join('');
+  const btnBar=document.getElementById('vBar'),btnEnd=document.getElementById('vEnd');
+  let cd=5,iv=null;
+  const ring=document.getElementById('ringP'),num=document.getElementById('cdNum'),txt=document.getElementById('cdText');
+  function paint(){num.textContent=cd;txt.textContent=cd+' 秒后播放';ring.style.strokeDashoffset=263.9*(1-cd/5)}
+  function startCD(){clearInterval(iv);cd=5;ring.style.transition='none';paint();ring.getBoundingClientRect();ring.style.transition='';
+    iv=setInterval(()=>{cd--;paint();if(cd<=0){clearInterval(iv);toast(tv,'正在播放 第 13 集 归途');setTimeout(()=>{if(tv.classList.contains('ending'))startCD()},2600)}},1000)}
+  function mode(m){
+    tv.classList.toggle('ending',m==='end');tv.classList.remove('clean');
+    btnBar.setAttribute('aria-pressed',m!=='end');btnEnd.setAttribute('aria-pressed',m==='end');
+    if(m==='end'){setFocus(tv,tv.querySelector('[data-k="now"]'));startCD()}
+    else{clearInterval(iv);setFocus(tv,tv.querySelector('[data-k="play"]'));keep(row,row.children[11],'x',120)}
+  }
+  btnBar.onclick=e=>{e.stopPropagation();activate(tv.closest('.screen'));mode('bar')};
+  btnEnd.onclick=e=>{e.stopPropagation();activate(tv.closest('.screen'));mode('end')};
+  hooks.video={
+    key(k){
+      if(tv.classList.contains('ending')){if(k==='back'){clearInterval(iv);mode('bar');toast(tv,'已取消自动播放');return true}return false}
+      if(tv.classList.contains('clean')){tv.classList.remove('clean');return true}
+      if(k==='back'||k==='menu'){tv.classList.add('clean');return true}
+      if(k==='down'&&tv.querySelector('.is-focus').closest('.btns')){const c=row.querySelector('.now');setFocus(tv,c);return true}
+      return false;
+    },
+    focus(el){if(el.classList.contains('mini'))keep(row,el,'x',120)},
+    ok(f){
+      if(f.dataset.k==='now'){clearInterval(iv);toast(tv,'正在播放 第 13 集 归途');setTimeout(startCD,2600)}
+      else if(f.dataset.k==='stay'){clearInterval(iv);mode('bar');toast(tv,'已取消自动播放')}
+      else if(f.dataset.n)toast(tv,'播放 第 '+f.dataset.n+' 集');
+      else if(f.dataset.k==='play')toast(tv,'已暂停');
+      else toast(tv,'打开 '+f.textContent.trim().slice(0,2)+' 选项');
+    }
+  };
+  setFocus(tv,tv.querySelector('[data-k="now"]'));
+  keep(row,row.children[11],'x',120);
+  startCD();
+})();
+
+/* ---------------- 5 图片查看 ---------------- */
+(function(){
+  const tv=document.getElementById('s-photo'),img=document.getElementById('pImg'),blur=document.getElementById('pBlur'),strip=document.getElementById('pStrip'),info=document.getElementById('pInfo');
+  let i=0,iv=null;
+  strip.innerHTML=PHOTOS.map(p=>`<div>${photoSVG(p.k)}</div>`).join('');
+  function show(n){
+    i=(n+PHOTOS.length)%PHOTOS.length;const p=PHOTOS[i];
+    img.classList.add('fade');
+    setTimeout(()=>{img.innerHTML=photoSVG(p.k).replace('slice','meet');blur.innerHTML=photoSVG(p.k);img.classList.remove('fade')},n===undefined?0:300);
+    document.getElementById('pTitle').textContent=p.title;
+    document.getElementById('pName').textContent=p.name;
+    document.getElementById('pIdx').textContent=`${i+1} / ${PHOTOS.length}`;
+    info.innerHTML=`<dt>拍摄时间</dt><dd class="num">${p.time}</dd><dt>尺寸</dt><dd class="num">${p.size}</dd><dt>文件大小</dt><dd class="num">${p.mb}</dd><dt>位置</dt><dd>E:\\Photos\\2025</dd>`;
+    [...strip.children].forEach((d,k)=>d.classList.toggle('cur',k===i));
+  }
+  img.innerHTML=photoSVG(PHOTOS[0].k).replace('slice','meet');blur.innerHTML=photoSVG(PHOTOS[0].k);show(0);
+  function stop(){clearInterval(iv);iv=null;tv.classList.remove('playing')}
+  hooks.photo={
+    key(k,tv){
+      if(iv){stop();toast(tv,'幻灯片已停止');return true}
+      const f=tv.querySelector('.is-focus');
+      if(f===img&&(k==='left'||k==='right')){show(i+(k==='right'?1:-1));return true}
+      if(f===img&&k==='ok'){info.classList.toggle('off');syncInfo();return true}
+      return false;
+    },
+    ok(f){
+      if(f.dataset.k==='show'){tv.classList.add('playing');setFocus(tv,img);iv=setInterval(()=>show(i+1),5000)}
+      if(f.dataset.k==='info'){info.classList.toggle('off');syncInfo()}
+    }
+  };
+  function syncInfo(){tv.querySelector('[data-k="info"]').textContent=info.classList.contains('off')?'显示信息':'隐藏信息'}
+  initFocus(tv);
+})();
+</script>
+</body>
+</html>

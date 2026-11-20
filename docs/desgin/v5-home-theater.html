@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<!--
+================================================================
+  v5 · 家庭放映室（Home Theater / 媒体库）设计方案
+================================================================
+  主题：这台电脑是家里的放映室，每个共享文件夹是一部“片库”，
+        手机是入座的观众。管理页 = 放映室后台。
+
+  配色（取自影院实景，不用荧光色）
+    #2A1D24  放映厅  观众席暗处的李子褐，作页面底色（非纯黑）
+    #3B2A33  座椅绒布  面板与卡片底色
+    #8E2433  幕布丝绒  品牌主色：顶部幕帘、电影海报、危险操作
+    #E9B44C  走道灯  唯一的“亮”：选中、开关开启、PIN、主按钮
+    #EEE8DC  银幕  主要文字与相册海报底色
+    #9DB2C6  放映光束  次要信息、动漫海报的夜蓝（#2F4170）
+    #B5A3A8  场内微光  次要文字
+
+  字体（仅 Windows 自带）
+    Microsoft YaHei UI —— 全部中文：海报大字用 800 粗体做“封面排版”
+    Bahnschrift（Condensed / SemiCondensed 宽度）—— 数字、容量、PIN、IP，
+      像影院售票口的电子字牌
+    Consolas —— 只用于电脑真实路径（它本来就是路径，不是装饰标签）
+
+  布局
+    ┌ 幕帘（丝绒褶 + 扇贝下摆）───────────────────────────────┐
+    │ 家庭放映室                放映机运行中 IP:端口  版本 [更新] │
+    ├──────────────────────────────────────┬──────────────────┤
+    │ 片库海报墙（5 张海报 + 空位“添加”）  │ 入场券：配对新手机 │
+    │ ─ 选中海报的“放映单”（权限 / 谁能看 / │  二维码 + PIN      │
+    │   移除）                              │ 已入座的手机       │
+    └──────────────────────────────────────┴──────────────────┘
+    左对齐；海报墙是全页唯一的“大胆之处”，其余面板安静克制。
+    ≤1080px 右栏落到下方，≤640px 海报两列。
+
+  核心原则
+    1. 封面全靠排版与色块生成：每部片库一种构图，而不是同一张卡片换颜色。
+    2. 权限说人话：“手机能下载回去看”，并在下面一句写清后果。
+    3. 只有一个动效时刻：页面打开时幕布拉开（尊重 reduced-motion）。
+    4. 移除 / 取消配对的文案必须讲清“电脑上的文件不受影响”。
+    5. 加密片库（见 04-vault.md）：管理页始终显示全部片库，加密的海报角上挂一枚
+       走道灯色小锁“加密”；放映单里设密码 / 修改密码 / 取消加密。
+================================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>家庭放映室 · LAN File Browser</title>
+<style>
+  :root{
+    --hall:#2A1D24; --hall-2:#241820; --seat:#3B2A33; --seat-2:#4A3540;
+    --velvet:#8E2433; --velvet-deep:#5E1621; --aisle:#E9B44C; --aisle-soft:rgba(233,180,76,.16);
+    --screen:#EEE8DC; --beam:#9DB2C6; --dim:#B5A3A8; --line:rgba(238,232,220,.12);
+    --cn:"Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+    --num:"Bahnschrift","Segoe UI",sans-serif;
+    --path:Consolas,"Cascadia Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--hall);
+    background-image:radial-gradient(1200px 500px at 30% -10%, rgba(142,36,51,.28), transparent 70%);
+    color:var(--screen); font:15px/1.6 var(--cn); min-height:100vh;
+  }
+  button,input{font:inherit;color:inherit}
+  button{cursor:pointer}
+  :focus-visible{outline:2px solid var(--aisle);outline-offset:3px;border-radius:4px}
+
+  /* ---------- 幕帘 ---------- */
+  .valance{
+    height:34px; position:relative;
+    background:repeating-linear-gradient(90deg,var(--velvet-deep) 0 6px,var(--velvet) 6px 22px,#A63040 22px 26px,var(--velvet) 26px 40px);
+  }
+  .valance::after{
+    content:""; position:absolute; left:0; right:0; bottom:-12px; height:12px;
+    background:radial-gradient(circle at 20px 0,var(--velvet) 12px,transparent 13px) 0 0/40px 12px repeat-x;
+  }
+  .curtain{position:fixed;top:0;bottom:0;width:51%;z-index:50;pointer-events:none;
+    background:repeating-linear-gradient(90deg,var(--velvet-deep) 0 10px,var(--velvet) 10px 34px,#A63040 34px 40px,var(--velvet) 40px 60px);
+    box-shadow:0 0 60px rgba(0,0,0,.6);}
+  .curtain.l{left:0;animation:openL 1.4s .25s cubic-bezier(.6,0,.2,1) forwards}
+  .curtain.r{right:0;animation:openR 1.4s .25s cubic-bezier(.6,0,.2,1) forwards}
+  @keyframes openL{to{transform:translateX(-102%)}}
+  @keyframes openR{to{transform:translateX(102%)}}
+  @media (prefers-reduced-motion:reduce){.curtain{display:none}}
+
+  /* ---------- 顶部 ---------- */
+  .top{max-width:1360px;margin:0 auto;padding:30px 32px 8px;display:flex;gap:24px;align-items:flex-end;justify-content:space-between;flex-wrap:wrap}
+  .brand h1{margin:0;font:800 34px/1.1 var(--cn);letter-spacing:.06em}
+  .brand p{margin:6px 0 0;color:var(--dim);font-size:14px}
+  .booth{display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--hall-2);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+  .lamp{display:flex;align-items:center;gap:8px;font-size:14px}
+  .lamp i{width:9px;height:9px;border-radius:50%;background:var(--aisle);box-shadow:0 0 10px var(--aisle)}
+  .booth .kv{display:flex;flex-direction:column;line-height:1.25}
+  .booth .kv small{color:var(--dim);font-size:12px}
+  .booth .kv b{font:600 17px var(--num);font-stretch:semi-condensed;letter-spacing:.02em}
+  .update{border:1px solid var(--aisle);background:var(--aisle-soft);color:var(--aisle);border-radius:8px;padding:6px 12px;font-size:13px}
+  .update:hover{background:var(--aisle);color:var(--hall)}
+
+  /* ---------- 主体 ---------- */
+  main{max-width:1360px;margin:0 auto;padding:18px 32px 48px;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:32px}
+  .sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin:10px 0 16px}
+  .sec-head h2{margin:0;font:700 22px var(--cn)}
+  .sec-head h2 span{font:400 15px var(--num);color:var(--dim);margin-left:8px}
+  .sec-head p{margin:0;color:var(--dim);font-size:13px}
+
+  /* ---------- 海报墙 ---------- */
+  .wall{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:20px 14px}
+  .slot{display:flex;flex-direction:column;gap:10px;background:none;border:0;padding:0;text-align:left}
+  .poster{container-type:inline-size;position:relative;aspect-ratio:2/3;border-radius:6px;overflow:hidden;box-shadow:0 14px 30px -12px rgba(0,0,0,.7);transition:transform .2s}
+  .slot:hover .poster{transform:translateY(-3px)}
+  .slot[aria-pressed="true"] .poster{outline:3px solid var(--aisle);outline-offset:4px}
+  .slot .cap b{display:block;font-size:15px}
+  .slot .cap small{display:block;color:var(--dim);font:12px/1.4 var(--num)}
+  .slot[aria-pressed="true"] .cap b{color:var(--aisle)}
+
+  /* 电影：幕布 + 胶片孔 */
+  .c-movie{background:repeating-linear-gradient(90deg,var(--velvet-deep) 0 8px,var(--velvet) 8px 30px,#A63040 30px 34px,var(--velvet) 34px 50px)}
+  .c-movie::before{content:"";position:absolute;left:0;top:0;bottom:0;width:16px;background:#1d1216;
+    -webkit-mask:repeating-linear-gradient(180deg,#000 0 6px,transparent 6px 10px);}
+  .c-movie .t{position:absolute;right:16px;top:16px;writing-mode:vertical-rl;font:800 36cqw/1 var(--cn);letter-spacing:.08em;color:var(--screen);text-shadow:0 4px 18px rgba(0,0,0,.4)}
+  .c-movie .n{position:absolute;left:26px;bottom:14px;font:700 19cqw/1 var(--num);font-stretch:condensed;color:var(--aisle)}
+  .c-movie .n small{display:block;font-size:8.5cqw;color:var(--screen);font-weight:400;margin-top:4px}
+  /* 动漫：夜空 + 月亮 */
+  .c-anime{background:linear-gradient(180deg,#22305A,#2F4170 60%,#3B5288)}
+  .c-anime::before{content:"";position:absolute;width:62%;aspect-ratio:1;right:-12%;top:8%;border-radius:50%;background:var(--aisle);box-shadow:0 0 0 12px rgba(233,180,76,.15)}
+  .c-anime::after{content:"";position:absolute;left:0;right:0;bottom:0;height:34%;background:linear-gradient(170deg,transparent 30%,#1B2546 31%)}
+  .c-anime .t{position:absolute;left:10px;bottom:22cqw;z-index:1;font:800 31cqw/1 var(--cn);color:var(--screen)}
+  .c-anime .n{position:absolute;left:10px;right:8px;bottom:10px;z-index:1;font:500 8.5cqw var(--num);color:var(--beam)}
+  /* 相册：银幕底 + 叠放的照片 */
+  .c-photo{background:var(--screen);color:var(--hall)}
+  .c-photo .f{position:absolute;width:56%;aspect-ratio:4/3;border:6px solid #fff;box-shadow:0 6px 14px rgba(42,29,36,.25)}
+  .c-photo .f1{left:10%;top:12%;background:var(--beam);transform:rotate(-8deg)}
+  .c-photo .f2{left:30%;top:20%;background:var(--aisle);transform:rotate(6deg)}
+  .c-photo .f3{left:18%;top:32%;background:var(--velvet);transform:rotate(-2deg)}
+  .c-photo .t{position:absolute;left:10px;bottom:22cqw;font:800 29cqw/1 var(--cn)}
+  .c-photo .n{position:absolute;left:10px;bottom:9px;font:700 15cqw/1 var(--num);font-stretch:condensed;color:transparent;-webkit-text-stroke:1.2px var(--hall)}
+  /* 工作资料：橄榄绒 + 横线稿纸 */
+  .c-work{background:#4B5640;background-image:repeating-linear-gradient(180deg,transparent 0 21px,rgba(238,232,220,.12) 21px 22px)}
+  .c-work .t{position:absolute;left:10px;top:12px;font:800 23cqw/1.12 var(--cn);color:var(--screen)}
+  .c-work .lock{position:absolute;left:10px;right:10px;bottom:10px;font-size:max(11px,7.5cqw);background:var(--hall);color:var(--screen);padding:3px 8px;border-radius:3px}
+  /* 新加入的片库 */
+  .c-new .t{position:absolute;left:8px;bottom:6px;font:800 66cqw/1 var(--cn);color:rgba(238,232,220,.9)}
+  .c-new .n{position:absolute;left:10px;top:10px;font:600 max(11px,8cqw) var(--num);color:rgba(238,232,220,.75)}
+  /* 断开：灯灭了 */
+  .c-off{background:var(--hall-2);border:2px dashed rgba(181,163,168,.35)}
+  .c-off .t{position:absolute;left:10px;top:12px;font:800 23cqw/1.1 var(--cn);color:rgba(181,163,168,.35)}
+  .c-off .warn{position:absolute;left:8px;right:8px;bottom:8px;font-size:max(11px,8cqw);color:var(--screen);background:rgba(142,36,51,.85);padding:6px 9px;border-radius:4px;line-height:1.4}
+  .slot.off .cap small{color:#E58A95}
+  /* 空位 */
+  .poster.empty{border:2px dashed rgba(233,180,76,.45);box-shadow:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--aisle);text-align:center;padding:16px}
+  .poster.empty .plus{font:300 32cqw/1 var(--num)}
+  .poster.empty span{font-size:14px}
+  .slot.add:hover .poster.empty{background:var(--aisle-soft)}
+  /* 加密片库标记：海报右上角一枚小锁（电影海报右侧是竖排片名，挪到左边胶片孔旁） */
+  .vault-mark{position:absolute;right:7px;top:7px;z-index:2;display:flex;align-items:center;gap:4px;padding:3px 7px 3px 6px;border-radius:999px;background:rgba(36,24,32,.82);border:1px solid rgba(233,180,76,.45);color:var(--aisle);font:600 11px/1 var(--cn)}
+  .vault-mark svg{width:10px;height:11px;flex:none}
+  .c-movie .vault-mark{right:auto;left:22px}
+
+  /* ---------- 放映单（权限） ---------- */
+  .sheet{margin-top:34px;background:var(--seat);border-radius:12px;border-top:4px solid var(--aisle);padding:24px 26px}
+  .sheet-head{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:16px}
+  .sheet-head h3{margin:0;font:800 26px var(--cn)}
+  .path{font:14px var(--path);color:var(--beam);word-break:break-all}
+  .facts{display:flex;gap:22px}
+  .facts div{display:flex;flex-direction:column;line-height:1.2}
+  .facts small{color:var(--dim);font-size:12px}
+  .facts b{font:600 22px var(--num);font-stretch:semi-condensed}
+  .facts b.bad{color:#E58A95;font:600 15px var(--cn)}
+  .sheet-body{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:30px;padding-top:18px}
+  .sheet h4{margin:0 0 10px;font:700 15px var(--cn);color:var(--dim)}
+  .perm{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .perm:last-child{border-bottom:0}
+  .perm b{display:block;font-size:15px;font-weight:600}
+  .perm small{display:block;color:var(--dim);font-size:13px;line-height:1.5}
+  .perm.risky small{color:#E8A0A8}
+  .sw{flex:none;width:46px;height:26px;border-radius:13px;border:0;background:var(--seat-2);position:relative;margin-top:2px;transition:background .15s}
+  .sw::after{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:var(--dim);transition:transform .15s,background .15s}
+  .sw[aria-checked="true"]{background:var(--aisle)}
+  .sw[aria-checked="true"]::after{transform:translateX(20px);background:var(--hall)}
+  .sw:disabled{cursor:not-allowed;opacity:.55}
+  .who{display:flex;gap:6px;background:var(--hall-2);border-radius:8px;padding:4px;margin-bottom:12px}
+  .who button{flex:1;border:0;background:none;padding:7px;border-radius:6px;font-size:14px;color:var(--dim)}
+  .who button[aria-pressed="true"]{background:var(--seat-2);color:var(--screen)}
+  .phone-pick{display:flex;flex-direction:column;gap:6px}
+  .phone-pick label{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:var(--hall-2);font-size:14px;cursor:pointer}
+  .phone-pick input{accent-color:var(--aisle);width:16px;height:16px}
+  .phone-pick.locked{opacity:.45;pointer-events:none}
+  .vault{margin-top:18px;padding-top:4px;border-top:1px solid var(--line)}
+  .vault .perm{border-bottom:0}
+  .vault-on{background:var(--hall-2);border-radius:8px;padding:12px 14px}
+  .vault-on p{margin:0 0 10px;color:var(--dim);font-size:13px;line-height:1.6}
+  .vault-on p strong{color:var(--screen);font-weight:600}
+  .vault-on .btn{padding:6px 12px;font-size:13px;margin-right:8px}
+  .remove{margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}
+  .remove p{margin:0 0 10px;color:var(--dim);font-size:13px}
+  .btn{border-radius:8px;padding:9px 16px;font-size:14px;border:1px solid transparent}
+  .btn.main{background:var(--aisle);color:var(--hall);font-weight:700}
+  .btn.main:hover{background:#F2C468}
+  .btn.ghost{background:none;border-color:rgba(238,232,220,.25)}
+  .btn.ghost:hover{border-color:var(--screen)}
+  .btn.danger{background:none;border-color:rgba(229,138,149,.5);color:#E58A95}
+  .btn.danger:hover{background:var(--velvet);color:var(--screen);border-color:var(--velvet)}
+  .btn.danger.solid{background:var(--velvet);border-color:var(--velvet);color:var(--screen)}
+
+  /* ---------- 右栏 ---------- */
+  aside{display:flex;flex-direction:column;gap:28px}
+  .ticket{position:relative;background:var(--screen);color:var(--hall);border-radius:10px;padding:20px 22px 18px}
+  .ticket::before,.ticket::after{content:"";position:absolute;width:22px;height:22px;border-radius:50%;background:var(--hall);top:calc(62% - 11px)}
+  .ticket::before{left:-11px}.ticket::after{right:-11px}
+  .ticket h2{margin:0;font:800 20px var(--cn)}
+  .ticket .lead{margin:4px 0 14px;font-size:13px;color:#5C4A52}
+  .qr{display:block;width:100%;max-width:200px;margin:0 auto;background:#fff;padding:8px;border-radius:4px}
+  .stub{margin-top:20px;border-top:2px dashed rgba(42,29,36,.3);padding-top:14px}
+  .stub small{font-size:13px;color:#5C4A52}
+  .pin{font:700 46px/1.1 var(--num);font-stretch:condensed;letter-spacing:.08em;color:var(--velvet)}
+  .stub-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .timer{font:600 15px var(--num);color:#5C4A52}
+  .timer.low{color:var(--velvet)}
+  .ticket .btn.ghost{border-color:rgba(42,29,36,.35);color:var(--hall);padding:6px 12px;font-size:13px}
+  .ticket .btn.ghost:hover{background:var(--hall);color:var(--screen)}
+
+  .seats{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+  .seat{display:grid;grid-template-columns:34px 1fr auto;gap:12px;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line)}
+  .seat .chair{width:30px;height:30px;border-radius:8px 8px 4px 4px;background:var(--velvet);position:relative}
+  .seat .chair::after{content:"";position:absolute;left:4px;right:4px;bottom:4px;height:8px;border-radius:3px;background:var(--velvet-deep)}
+  .seat.recent .chair{box-shadow:0 0 0 2px var(--aisle)}
+  .seat b{display:block;font-size:15px}
+  .seat small{color:var(--dim);font-size:13px}
+  .seat .btn{padding:5px 10px;font-size:13px}
+  .empty-note{color:var(--dim);font-size:14px;padding:12px 0}
+  .foot{color:var(--dim);font-size:12px;line-height:1.7}
+
+  /* ---------- 弹窗 & 提示 ---------- */
+  dialog{border:0;border-radius:12px;padding:0;background:var(--seat);color:var(--screen);width:min(480px,92vw);box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  dialog::backdrop{background:rgba(26,17,22,.75)}
+  .dlg{padding:24px 26px}
+  .dlg h3{margin:0 0 6px;font:800 20px var(--cn)}
+  .dlg p{margin:0 0 16px;color:var(--dim);font-size:14px}
+  .dlg p strong{color:var(--screen);font-weight:600}
+  .field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+  .field span{font-size:14px}
+  .field span em{font-style:normal;color:var(--dim);font-size:13px}
+  .field input{background:var(--hall-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .field input.mono{font-family:var(--path)}
+  .field input:focus{outline:none;border-color:var(--aisle)}
+  .err{color:#E58A95;font-size:13px;min-height:1.2em;margin:-6px 0 10px}
+  .dlg-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:6px}
+  .toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,20px);opacity:0;background:var(--screen);color:var(--hall);padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600;transition:.2s;pointer-events:none;z-index:60}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  @media (max-width:1080px){
+    main{grid-template-columns:1fr}
+    aside{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start}
+  }
+  @media (max-width:760px){
+    .top,main{padding-left:16px;padding-right:16px}
+    aside{grid-template-columns:1fr}
+    .sheet-body{grid-template-columns:1fr}
+    .wall{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+</style>
+</head>
+<body>
+<div class="curtain l" aria-hidden="true"></div>
+<div class="curtain r" aria-hidden="true"></div>
+<div class="valance" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="brand">
+    <h1>家庭放映室</h1>
+    <p>把这台电脑里的电影、动漫和相册，放给家里的手机看</p>
+  </div>
+  <div class="booth" aria-label="服务状态">
+    <div class="lamp"><i></i>放映机运行中</div>
+    <div class="kv"><small>手机连这个地址</small><b>192.168.1.5:8686</b></div>
+    <div class="kv"><small>当前版本</small><b id="ver">1.2.0</b></div>
+    <button class="update" id="updateBtn">有新版本 1.3.0，更新</button>
+  </div>
+</header>
+
+<main>
+  <section aria-labelledby="libTitle">
+    <div class="sec-head">
+      <h2 id="libTitle">片库<span id="libCount"></span></h2>
+      <p>点一张海报，在下面设置手机能做什么</p>
+    </div>
+    <div class="wall" id="wall"></div>
+    <div class="sheet" id="sheet" aria-live="polite"></div>
+  </section>
+
+  <aside>
+    <section class="ticket" aria-labelledby="pairTitle">
+      <h2 id="pairTitle">让新手机入场</h2>
+      <p class="lead">在手机 App 里扫这张码，或手动输入下面的 6 位数字</p>
+      <svg class="qr" id="qr" viewBox="0 0 29 29" shape-rendering="crispEdges" role="img" aria-label="配对二维码"></svg>
+      <div class="stub">
+        <small>配对码</small>
+        <div class="pin" id="pin">482 913</div>
+        <div class="stub-row">
+          <span class="timer" id="timer">4:59 后失效</span>
+          <button class="btn ghost" id="refreshPin">换一组</button>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="seatTitle">
+      <div class="sec-head"><h2 id="seatTitle">已入座的手机<span id="phoneCount"></span></h2></div>
+      <ul class="seats" id="seats"></ul>
+    </section>
+
+    <p class="foot">这个管理页只能在这台电脑上打开。<br>手机和电脑要连同一个 Wi-Fi。</p>
+  </aside>
+</main>
+
+<!-- 添加片库 -->
+<dialog id="addDlg">
+  <form class="dlg" id="addForm" method="dialog">
+    <h3>添加片库</h3>
+    <p>选一个电脑上的文件夹，手机就能浏览和播放里面的内容。</p>
+    <label class="field"><span>文件夹路径</span>
+      <input class="mono" id="addPath" placeholder="D:\Movies" autocomplete="off"></label>
+    <div class="err" id="addErr"></div>
+    <label class="field"><span>手机上显示的名字 <em>可不填，默认用文件夹名</em></span>
+      <input id="addName" placeholder="例如：纪录片" autocomplete="off"></label>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" data-close>取消</button>
+      <button type="submit" class="btn main">添加片库</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 加密片库：设置 / 修改密码 -->
+<dialog id="vaultDlg">
+  <form class="dlg" id="vaultForm" novalidate>
+    <h3 id="vTitle"></h3>
+    <p id="vText"></p>
+    <label class="field"><span>密码 <em>4–16 位，可以只用数字</em></span>
+      <input type="password" id="vPw1" maxlength="16" autocomplete="new-password"></label>
+    <label class="field"><span>再输一次</span>
+      <input type="password" id="vPw2" maxlength="16" autocomplete="new-password"></label>
+    <div class="err" id="vErr" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" data-close>取消</button>
+      <button type="submit" class="btn main" id="vOk"></button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 通用确认 -->
+<dialog id="confirmDlg">
+  <div class="dlg">
+    <h3 id="cfTitle"></h3>
+    <p id="cfText"></p>
+    <div class="dlg-actions">
+      <button class="btn ghost" data-close>先不了</button>
+      <button class="btn danger solid" id="cfOk"></button>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var phones = [
+    { id: "mi14", name: "小米 14", seen: "2 分钟前", recent: true },
+    { id: "pixel8", name: "Pixel 8", seen: "昨天 21:40" },
+    { id: "redmi9", name: "老人机 Redmi Note 9", seen: "12 天前" }
+  ];
+
+  var folders = [
+    { id: "movie", name: "电影", path: "D:\\Movies", size: "1.2 TB", files: "386", cover: "movie",
+      perm: { dl: true, up: false, del: false, hid: false }, who: "all", picked: [] },
+    { id: "anime", name: "动漫", path: "D:\\Anime", size: "640 GB", files: "2,140", cover: "anime",
+      perm: { dl: true, up: false, del: false, hid: false }, who: "all", picked: [] },
+    { id: "photo", name: "相册", path: "E:\\Photos\\2025", size: "82 GB", files: "9,512", cover: "photo",
+      perm: { dl: true, up: true, del: false, hid: false }, who: "all", picked: [] },
+    { id: "work", name: "工作资料", path: "C:\\Users\\Li\\Documents\\Work", size: "3.4 GB", files: null, cover: "work",
+      perm: { dl: false, up: false, del: false, hid: false }, who: "some", picked: ["mi14"], vault: true },
+    { id: "backup", name: "旧硬盘", path: "F:\\Backup", size: null, files: null, cover: "off", missing: true,
+      perm: { dl: false, up: false, del: false, hid: false }, who: "all", picked: [] }
+  ];
+
+  var PERMS = [
+    { key: "play", title: "手机能打开看、能播放", note: "这是共享的前提，一直开着。", locked: true },
+    { key: "dl", title: "手机能下载回去看", note: "存到手机里，出门没网也能看。" },
+    { key: "up", title: "手机能往这里放东西", note: "比如把手机拍的照片传回这台电脑。" },
+    { key: "del", title: "手机能删除、改名", note: "在手机上删掉的文件，电脑上也会一起没了。", risky: true },
+    { key: "hid", title: "显示藏起来的文件", note: "电脑上设为“隐藏”的文件也会出现在手机上。" }
+  ];
+
+  var VAULT_MARK = '<span class="vault-mark" title="加密片库：手机和电视上要输密码才出现">' +
+    '<svg viewBox="0 0 10 11" aria-hidden="true"><path d="M2.5 5V3.5a2.5 2.5 0 0 1 5 0V5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="1" y="5" width="8" height="6" rx="1.2" fill="currentColor"/></svg>加密</span>';
+  var NEW_COLORS =["#6B3A5A", "#2F5E63", "#7A5A2B", "#3E4C7A", "#5A2E2E"];
+  var selected = "movie";
+
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function phoneName(id) {
+    for (var i = 0; i < phones.length; i++) if (phones[i].id === id) return phones[i].name;
+    return "";
+  }
+  function find(id) {
+    for (var i = 0; i < folders.length; i++) if (folders[i].id === id) return folders[i];
+    return null;
+  }
+
+  var toastTimer;
+  function toast(msg) {
+    var t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove("show"); }, 2200);
+  }
+
+  /* ---------- 海报封面 ---------- */
+  function cover(f) {
+    var n = esc(f.name);
+    switch (f.cover) {
+      case "movie":
+        return '<div class="poster c-movie"><div class="t">' + n + '</div><div class="n">' + f.size + '<small>' + f.files + ' 个文件</small></div></div>';
+      case "anime":
+        return '<div class="poster c-anime"><div class="t">' + n + '</div><div class="n">' + f.size + '，' + f.files + ' 个文件</div></div>';
+      case "photo":
+        return '<div class="poster c-photo"><div class="f f1"></div><div class="f f2"></div><div class="f f3"></div><div class="t">' + n + '</div><div class="n">2025</div></div>';
+      case "work":
+        var t = f.name.length > 2 ? esc(f.name.slice(0, 2)) + "<br>" + esc(f.name.slice(2)) : n;
+        var lock = f.who === "some" ? (f.picked.length ? "仅" + esc(f.picked.map(phoneName).join("、")) + "可见" : "暂时没有手机能看") : "全部手机可见";
+        return '<div class="poster c-work"><div class="t">' + t + '</div><div class="lock">' + lock + '</div></div>';
+      case "off":
+        return '<div class="poster c-off"><div class="t">' + n + '</div><div class="warn">找不到这个文件夹<br>硬盘可能没接上</div></div>';
+      default:
+        return '<div class="poster c-new" style="background:' + f.color + '"><div class="n">新片库</div><div class="t">' + esc(f.name.charAt(0)) + '</div></div>';
+    }
+  }
+
+  function capLine(f) {
+    if (f.missing) return "路径不存在";
+    if (!f.size) return "正在统计大小…";
+    return f.size + (f.files ? "，" + f.files + " 个文件" : "");
+  }
+
+  function renderWall() {
+    var html = folders.map(function (f) {
+      var c = f.vault ? cover(f).replace(/^(<div[^>]*>)/, "$1" + VAULT_MARK) : cover(f);
+      return '<button class="slot' + (f.missing ? " off" : "") + '" data-id="' + f.id + '" aria-pressed="' + (f.id === selected) + '">' +
+        c + '<div class="cap"><b>' + esc(f.name) + '</b><small>' + capLine(f) + '</small></div></button>';
+    }).join("");
+    html += '<button class="slot add" id="addSlot"><div class="poster empty"><div class="plus">+</div><span>添加片库</span></div>' +
+      '<div class="cap"><b>&nbsp;</b><small>&nbsp;</small></div></button>';
+    $("wall").innerHTML = html;
+    $("libCount").textContent = folders.length + " 个";
+  }
+
+  /* ---------- 放映单 ---------- */
+  function renderSheet() {
+    var f = find(selected);
+    var el = $("sheet");
+    if (!f) {
+      el.innerHTML = '<p class="empty-note">还没有片库。点上面的“添加片库”，选一个电脑上的文件夹开始。</p>';
+      return;
+    }
+    var facts = f.missing
+      ? '<div><small>状态</small><b class="bad">路径不存在，硬盘未连接</b></div>'
+      : '<div><small>大小</small><b>' + (f.size || "统计中") + '</b></div>' +
+        (f.files ? '<div><small>文件</small><b>' + f.files + '</b></div>' : '') +
+        '<div><small>状态</small><b style="font:600 15px var(--cn);color:var(--aisle)">正常</b></div>';
+
+    var perms = PERMS.map(function (p) {
+      var on = p.locked ? true : f.perm[p.key];
+      return '<div class="perm' + (p.risky ? " risky" : "") + '"><div><b id="pl-' + p.key + '">' + p.title + '</b><small>' + p.note + '</small></div>' +
+        '<button class="sw" role="switch" aria-labelledby="pl-' + p.key + '" aria-checked="' + on + '" data-perm="' + p.key + '"' + (p.locked ? " disabled" : "") + '></button></div>';
+    }).join("");
+
+    var pick = phones.map(function (ph) {
+      return '<label><input type="checkbox" data-phone="' + ph.id + '"' + (f.picked.indexOf(ph.id) > -1 ? " checked" : "") + '>' + esc(ph.name) + '</label>';
+    }).join("");
+    if (!phones.length) pick = '<p class="empty-note">还没有配对的手机。</p>';
+
+    var vault = '<div class="vault"><div class="perm"><div><b id="pl-vault">设为加密片库</b>' +
+      '<small>手机和电视上平时看不到这个片库。在首页长按电脑名称（电视上长按遥控器的菜单键），输入密码后才会出现。</small></div>' +
+      '<button class="sw" role="switch" aria-labelledby="pl-vault" aria-checked="' + !!f.vault + '" data-vault></button></div>' +
+      (f.vault ? '<div class="vault-on"><p>已加密。<strong>电脑上的文件不会被加密或改动</strong>，在这台电脑上照常能打开。忘记密码不要紧，点“修改密码”直接设个新的。</p>' +
+        '<button class="btn ghost" id="vaultChange">修改密码</button><button class="btn danger" id="vaultOff">取消加密</button></div>' : '') +
+      '</div>';
+
+    el.innerHTML =
+      '<div class="sheet-head"><div><h3>' + esc(f.name) + '</h3><div class="path">' + esc(f.path) + '</div></div><div class="facts">' + facts + '</div></div>' +
+      (f.missing ? '<p style="color:var(--dim);font-size:14px;margin:14px 0 0">把 F 盘的硬盘接回电脑，这部片库会自动恢复，设置都还在。</p>' : '') +
+      '<div class="sheet-body">' +
+        '<div><h4>手机能做什么</h4>' + perms + vault + '</div>' +
+        '<div><h4>哪些手机能看到</h4>' +
+          '<div class="who" role="group" aria-label="可见范围"><button data-who="all" aria-pressed="' + (f.who === "all") + '">全部手机</button><button data-who="some" aria-pressed="' + (f.who === "some") + '">指定手机</button></div>' +
+          '<div class="phone-pick' + (f.who === "all" ? " locked" : "") + '">' + pick + '</div>' +
+          '<div class="remove"><p>移除后手机上就看不到“' + esc(f.name) + '”了。电脑里 ' + esc(f.path) + ' 的文件不会被删除。</p>' +
+          '<button class="btn danger" id="removeBtn">移除这个片库</button></div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function renderSeats() {
+    $("phoneCount").textContent = phones.length + " 台";
+    if (!phones.length) {
+      $("seats").innerHTML = '<li class="empty-note">还没有手机入座。用上面的二维码或配对码让手机入场。</li>';
+      return;
+    }
+    $("seats").innerHTML = phones.map(function (p) {
+      return '<li class="seat' + (p.recent ? " recent" : "") + '"><span class="chair" aria-hidden="true"></span>' +
+        '<div><b>' + esc(p.name) + '</b><small>最后来看：' + p.seen + '</small></div>' +
+        '<button class="btn danger" data-revoke="' + p.id + '">取消配对</button></li>';
+    }).join("");
+  }
+
+  function renderAll() { renderWall(); renderSheet(); renderSeats(); }
+
+  /* ---------- 事件 ---------- */
+  $("wall").addEventListener("click", function (e) {
+    var slot = e.target.closest(".slot");
+    if (!slot) return;
+    if (slot.id === "addSlot") { openAdd(); return; }
+    selected = slot.dataset.id;
+    renderWall(); renderSheet();
+  });
+
+  $("sheet").addEventListener("click", function (e) {
+    var f = find(selected);
+    if (!f) return;
+    var sw = e.target.closest(".sw");
+    if ((sw && sw.hasAttribute("data-vault") && !f.vault) || e.target.id === "vaultChange") {
+      openVault(f);
+      return;
+    }
+    if ((sw && sw.hasAttribute("data-vault")) || e.target.id === "vaultOff") {
+      confirmBox("取消“" + f.name + "”的加密？",
+        "取消后，能看到这个片库的手机和电视会直接在首页看到它，不用再输密码。<strong>电脑上的文件不受影响。</strong>",
+        "取消加密", function () {
+          f.vault = false;
+          renderWall(); renderSheet();
+          toast("已取消加密：" + f.name);
+        });
+      return;
+    }
+    if (sw && !sw.disabled) {
+      var k = sw.dataset.perm;
+      f.perm[k] = !f.perm[k];
+      var title = PERMS.filter(function (p) { return p.key === k; })[0].title;
+      toast((f.perm[k] ? "已开启：" : "已关闭：") + title);
+      renderSheet();
+      return;
+    }
+    var w = e.target.closest("[data-who]");
+    if (w) {
+      f.who = w.dataset.who;
+      renderWall(); renderSheet();
+      toast(f.who === "all" ? "“" + f.name + "”全部手机都能看到" : "勾选能看到“" + f.name + "”的手机");
+      return;
+    }
+    if (e.target.id === "removeBtn") {
+      confirmBox("移除“" + f.name + "”？",
+        "手机上将看不到这个片库。<strong>电脑里 " + esc(f.path) + " 的文件原样保留，不会被删除。</strong>",
+        "移除片库", function () {
+          var i = folders.indexOf(f);
+          folders.splice(i, 1);
+          selected = folders.length ? folders[Math.max(0, i - 1)].id : null;
+          renderAll();
+          toast("已移除片库：" + f.name);
+        });
+    }
+  });
+
+  $("sheet").addEventListener("change", function (e) {
+    var f = find(selected);
+    var id = e.target.dataset.phone;
+    if (!f || !id) return;
+    if (e.target.checked) { if (f.picked.indexOf(id) < 0) f.picked.push(id); }
+    else f.picked = f.picked.filter(function (x) { return x !== id; });
+    renderWall();
+    toast((e.target.checked ? "现在能看：" : "现在看不到：") + phoneName(id));
+  });
+
+  $("seats").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-revoke]");
+    if (!b) return;
+    var id = b.dataset.revoke, name = phoneName(id);
+    confirmBox("取消“" + name + "”的配对？",
+      "这台手机将立刻无法再浏览和播放，想再看需要重新扫码配对。<strong>电脑上的文件不受影响。</strong>",
+      "取消配对", function () {
+        phones = phones.filter(function (p) { return p.id !== id; });
+        folders.forEach(function (f) { f.picked = f.picked.filter(function (x) { return x !== id; }); });
+        renderAll();
+        toast("已取消配对：" + name);
+      });
+  });
+
+  /* ---------- 弹窗 ---------- */
+  document.querySelectorAll("[data-close]").forEach(function (b) {
+    b.addEventListener("click", function () { b.closest("dialog").close(); });
+  });
+
+  var cfAction = null;
+  function confirmBox(title, html, okText, fn) {
+    $("cfTitle").textContent = title;
+    $("cfText").innerHTML = html;
+    $("cfOk").textContent = okText;
+    cfAction = fn;
+    $("confirmDlg").showModal();
+  }
+  $("cfOk").addEventListener("click", function () {
+    $("confirmDlg").close();
+    if (cfAction) cfAction();
+  });
+
+  var vaultTarget = null;
+  function openVault(f) {
+    vaultTarget = f;
+    var n = esc(f.name);
+    $("vTitle").textContent = f.vault ? "修改“" + f.name + "”的密码" : "给“" + f.name + "”设密码";
+    $("vText").innerHTML = f.vault
+      ? "不需要旧密码，直接设新的。改好后，手机和电视要输新密码才能看到“" + n + "”。"
+      : "设好后，手机和电视上平时看不到“" + n + "”。在首页长按电脑名称（电视上长按遥控器的菜单键）输入这个密码，它才会出现。<strong>电脑上的文件不会被加密或改动。</strong>";
+    $("vOk").textContent = f.vault ? "保存新密码" : "设为加密片库";
+    $("vPw1").value = ""; $("vPw2").value = ""; $("vErr").textContent = "";
+    $("vaultDlg").showModal();
+    $("vPw1").focus();
+  }
+  $("vaultForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var f = vaultTarget, p1 = $("vPw1").value, p2 = $("vPw2").value;
+    if (p1.length < 4 || p1.length > 16) {
+      $("vErr").textContent = "密码要 4 到 16 位";
+      $("vPw1").focus();
+      return;
+    }
+    if (p1 !== p2) {
+      $("vErr").textContent = "两次输入的密码不一样，请再输一次";
+      $("vPw2").value = "";
+      $("vPw2").focus();
+      return;
+    }
+    var changed = f.vault;
+    f.vault = true;
+    $("vaultDlg").close();
+    renderWall(); renderSheet();
+    toast(changed ? "已修改“" + f.name + "”的密码" : "已设为加密片库：" + f.name);
+  });
+
+  function openAdd() {
+    $("addPath").value = ""; $("addName").value = ""; $("addErr").textContent = "";
+    $("addDlg").showModal();
+    $("addPath").focus();
+  }
+  $("addForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var path = $("addPath").value.trim().replace(/^"|"$/g, "");
+    if (!/^[A-Za-z]:\\/.test(path)) {
+      $("addErr").textContent = "请填写完整路径，以盘符开头，例如 D:\\Movies";
+      $("addPath").focus();
+      return;
+    }
+    if (folders.some(function (f) { return f.path.toLowerCase() === path.toLowerCase(); })) {
+      $("addErr").textContent = "这个文件夹已经在片库里了";
+      return;
+    }
+    var parts = path.replace(/\\+$/, "").split("\\");
+    var name = $("addName").value.trim() || parts[parts.length - 1] || path;
+    var id = "f" + Date.now();
+    folders.push({ id: id, name: name, path: path, size: null, files: null, cover: "new",
+      color: NEW_COLORS[folders.length % NEW_COLORS.length],
+      perm: { dl: false, up: false, del: false, hid: false }, who: "all", picked: [] });
+    selected = id;
+    $("addDlg").close();
+    renderAll();
+    toast("已添加片库：" + name);
+  });
+
+  $("updateBtn").addEventListener("click", function () {
+    var b = this;
+    b.disabled = true;
+    b.textContent = "正在下载 1.3.0…";
+    setTimeout(function () {
+      $("ver").textContent = "1.3.0";
+      b.remove();
+      toast("已更新到 1.3.0");
+    }, 1600);
+  });
+
+  /* ---------- 配对：二维码占位 + PIN 倒计时 ---------- */
+  function drawQR(seed) {
+    var N = 29, s = seed, cells = "";
+    function rnd() { s = (s * 9301 + 49297) % 233280; return s / 233280; }
+    function finder(x, y) {
+      return '<rect x="' + x + '" y="' + y + '" width="7" height="7" fill="#2A1D24"/>' +
+        '<rect x="' + (x + 1) + '" y="' + (y + 1) + '" width="5" height="5" fill="#fff"/>' +
+        '<rect x="' + (x + 2) + '" y="' + (y + 2) + '" width="3" height="3" fill="#2A1D24"/>';
+    }
+    function inFinder(x, y) {
+      return (x < 8 && y < 8) || (x > N - 9 && y < 8) || (x < 8 && y > N - 9);
+    }
+    for (var y = 0; y < N; y++) for (var x = 0; x < N; x++) {
+      if (inFinder(x, y)) continue;
+      if (rnd() > 0.52) cells += '<rect x="' + x + '" y="' + y + '" width="1" height="1"/>';
+    }
+    $("qr").innerHTML = '<g fill="#2A1D24">' + cells + '</g>' + finder(0, 0) + finder(N - 7, 0) + finder(0, N - 7) +
+      '<rect x="11" y="11" width="7" height="7" rx="1.5" fill="#8E2433"/><rect x="13" y="13" width="3" height="3" fill="#EEE8DC"/>';
+  }
+
+  var left = 300, tick;
+  function startTimer() {
+    left = 300;
+    clearInterval(tick);
+    paint();
+    tick = setInterval(function () {
+      left--;
+      if (left <= 0) { clearInterval(tick); left = 0; }
+      paint();
+    }, 1000);
+  }
+  function paint() {
+    var t = $("timer");
+    if (left === 0) { t.textContent = "已失效，请换一组"; t.classList.add("low"); return; }
+    var m = Math.floor(left / 60), s = left % 60;
+    t.textContent = m + ":" + (s < 10 ? "0" : "") + s + " 后失效";
+    t.classList.toggle("low", left < 60);
+  }
+  $("refreshPin").addEventListener("click", function () {
+    var n = String(Math.floor(100000 + Math.random() * 900000));
+    $("pin").textContent = n.slice(0, 3) + " " + n.slice(3);
+    drawQR(+n);
+    startTimer();
+    toast("已换一组配对码，5 分钟内有效");
+  });
+
+  drawQR(482913);
+  startTimer();
+  renderAll();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+<polygon points="33,64 46.5,32 77,54.5 42,73" fill="#000" opacity=".4"/>
+<rect x="49" y="33" width="26" height="19" rx="1.5" fill="#000"/>
+<path d="M37,59 a10,10 0 1 0 0.01,0 Z M37,64.5 a4.5,4.5 0 1 1 -0.01,0 Z" fill="#000" fill-rule="evenodd"/>
+</svg>
