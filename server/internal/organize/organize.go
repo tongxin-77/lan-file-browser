@@ -265,6 +265,9 @@ func (m *Manager) runShare(ctx context.Context, id string) {
 	r := m.rt(id)
 	r.mu.Lock()
 	wait := minStableGap - m.o.Clock.Now().Sub(r.lastScan)
+	if wait > 0 {
+		r.state = "scanning"
+	}
 	r.mu.Unlock()
 	if wait > 0 { // 与上次扫描不足 1 分钟：等满再比对
 		if m.o.Clock.Sleep(ctx, wait) != nil {
@@ -900,9 +903,14 @@ func (m *Manager) DryRun(id string) ([]DryItem, int, error) {
 			if !ok {
 				continue // 孤立字幕不处理
 			}
+			d := DryItem{src.ID, e.Rel, cat, target, actionFor(src, p, m), "字幕跟随视频"}
+			if rec, _ := latestBySrc(m.o.DB, p.share.ID, src.ID, strings.ToLower(e.Rel)); rec != nil && rec.Size == e.Size &&
+				rec.Mtime == e.Mtime.UnixNano() && (rec.State == StateDone || rec.State == StateDuplicate) {
+				d.TargetPath, d.Action, d.Note = rec.TargetPath, "done", "已整理过"
+			}
 			total++
 			if len(items) < dryRunMax {
-				items = append(items, DryItem{src.ID, e.Rel, cat, target, actionFor(src, p, m), "字幕跟随视频"})
+				items = append(items, d)
 			}
 		}
 	}
