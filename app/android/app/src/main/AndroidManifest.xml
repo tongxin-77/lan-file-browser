@@ -3,10 +3,13 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- 播放期间 WifiLock（docs/05-playback.md 2.4） -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 保存图片到相册：Android 10+ 走 MediaStore 无需权限，9 及以下需要（gal 插件） -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <application
         android:label="LAN File Browser"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:requestLegacyExternalStorage="true"
         android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
