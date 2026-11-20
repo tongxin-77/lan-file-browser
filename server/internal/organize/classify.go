@@ -71,12 +71,12 @@ func (p Plan) Target() string { return path.Join(p.Dir, p.Name) }
 var (
 	reCamera   = regexp.MustCompile(`(?i)^(?:VID|MVIMG|PXL)_|^VID-\d{8}-WA`)
 	reCameraIM = regexp.MustCompile(`(?i)^IMG_`)
-	reDate     = regexp.MustCompile(`((?:19|20)\d{2})(\d{2})(\d{2})`)
+	reDate     = regexp.MustCompile(`(?:^|\D)((?:19|20)\d{2})[-_.]?(\d{2})[-_.]?(\d{2})(?:\D|$)`)
 	reYear     = regexp.MustCompile(`(?:^|[^0-9])((?:19|20)\d{2})(?:[^0-9]|$)`)
 )
 
 // classify 按 06 文档 5.1 的规则顺序归类。rel 为相对源文件夹的路径（/ 分隔）；
-// photoTime 返回图片的 EXIF 拍摄时间（可为 nil）。
+// photoTime 返回图片的 EXIF 拍摄时间（可为 nil）；无 EXIF 时取文件名中的日期，再无则取修改时间。
 func classify(rel string, mtime time.Time, photoTime func() (time.Time, bool)) Plan {
 	dir, name := path.Split(rel)
 	dir = strings.TrimSuffix(dir, "/")
@@ -91,6 +91,9 @@ func classify(rel string, mtime time.Time, photoTime func() (time.Time, bool)) P
 			if t, ok := photoTime(); ok {
 				return photoDir(t)
 			}
+		}
+		if t, ok := nameDate(stem); ok {
+			return photoDir(t)
 		}
 		return photoDir(mtime)
 	}
@@ -127,7 +130,8 @@ func classify(rel string, mtime time.Time, photoTime func() (time.Time, bool)) P
 	return Plan{CatUnsorted, "未分类", name} // 5
 }
 
-// nameDate 取文件名中的 YYYYMMDD 日期。
+// nameDate 取文件名中前后不接数字的合法日期：YYYYMMDD 或以 - _ . 分隔的 YYYY-MM-DD 等
+// （IMG_20250314_101010、PXL_20250314_…、Screenshot_2025-03-14…）。
 func nameDate(stem string) (time.Time, bool) {
 	for _, m := range reDate.FindAllStringSubmatch(stem, -1) {
 		if t, err := time.ParseInLocation("20060102", m[1]+m[2]+m[3], time.Local); err == nil {
