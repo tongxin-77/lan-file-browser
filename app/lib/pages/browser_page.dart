@@ -6,7 +6,10 @@ import '../models/file_item.dart';
 import '../models/share.dart';
 import '../theme.dart';
 import '../widgets/file_tile.dart';
+import '../services/playback.dart';
 import '../widgets/lamp_glow.dart';
+import '../widgets/thumb.dart';
+import 'image_viewer_page.dart';
 import 'player_page.dart';
 
 /// 文件夹浏览（03 §4.2）：分页加载、下拉刷新（If-None-Match）、底部面包屑。
@@ -34,6 +37,7 @@ class _BrowserPageState extends State<BrowserPage> {
   String? _etag; // 第一页的 ETag：服务端按完整列表计算，304 表示整个目录未变
   bool _loading = false;
   String? _error;
+  bool _grid = false;
 
   @override
   void initState() {
@@ -120,13 +124,34 @@ class _BrowserPageState extends State<BrowserPage> {
       case FileKind.dir:
         _go(path);
       case FileKind.video:
+        Navigator.of(context)
+            .push(
+              MaterialPageRoute<void>(
+                builder: (_) => PlayerPage(
+                  client: widget.client,
+                  shareId: widget.share.id,
+                  path: path,
+                  title: item.name,
+                  startAt: resumePosition(item.progress),
+                ),
+              ),
+            )
+            .then((_) {
+              // ETag 不含进度：不带 If-None-Match 重新取，刷新进度条
+              if (!mounted) return;
+              _etag = null;
+              _refresh();
+            });
+      case FileKind.image:
+        final images = _items.where((i) => i.kind == FileKind.image).toList();
         Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) => PlayerPage(
+            builder: (_) => ImageViewerPage(
               client: widget.client,
-              shareId: widget.share.id,
-              path: path,
-              title: item.name,
+              share: widget.share,
+              dir: _path,
+              images: images,
+              initialIndex: images.indexOf(item),
             ),
           ),
         );
@@ -200,6 +225,25 @@ class _BrowserPageState extends State<BrowserPage> {
                 ),
               ],
             )
+          : _grid
+          ? GridView.builder(
+              controller: _scroll,
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 180,
+                childAspectRatio: 0.9,
+              ),
+              itemCount: _items.length,
+              itemBuilder: (context, i) {
+                final item = _items[i];
+                return FileGridTile(
+                  item: item,
+                  thumbnail: _thumb(item),
+                  onTap: () => _open(item),
+                );
+              },
+            )
           : ListView.builder(
               controller: _scroll,
               physics: const AlwaysScrollableScrollPhysics(),
@@ -212,9 +256,26 @@ class _BrowserPageState extends State<BrowserPage> {
                   );
                 }
                 final item = _items[i];
-                return FileTile(item: item, onTap: () => _open(item));
+                return FileTile(
+                  item: item,
+                  thumbnail: _thumb(item, width: 64),
+                  onTap: () => _open(item),
+                );
               },
             ),
+    );
+  }
+
+  /// hasThumb 时的缩略图（03 §4.5）；否则 null，用类别图标。
+  Widget? _thumb(FileItem item, {double? width}) {
+    if (!item.hasThumb) return null;
+    return ServerThumb(
+      client: widget.client,
+      share: widget.share.id,
+      path: joinPath(_path, item.name),
+      mtime: item.mtime,
+      width: width,
+      placeholder: ThumbPlaceholder(icon: kindIcon(item.kind)),
     );
   }
 
@@ -259,6 +320,11 @@ class _BrowserPageState extends State<BrowserPage> {
               ],
             ),
           ),
+        ),
+        IconButton(
+          tooltip: _grid ? '列表' : '网格',
+          icon: Icon(_grid ? Icons.view_list : Icons.grid_view),
+          onPressed: () => setState(() => _grid = !_grid),
         ),
       ],
     );
