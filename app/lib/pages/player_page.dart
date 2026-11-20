@@ -8,6 +8,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../api/api_exception.dart';
 import '../api/lfb_client.dart';
+import '../app.dart' show vaultController;
 import '../services/platform.dart';
 import '../theme.dart';
 import '../widgets/file_tile.dart';
@@ -145,6 +146,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (!mounted) return;
     setState(() => _position = p);
     if (p <= Duration.zero) return; // 出错时位置可能归零，不覆盖断点
+    if (_playing) vaultController.touch(); // 播放中不算空闲（04 §8）
     if (_reconnecting && p > _resumeAt + const Duration(seconds: 2)) {
       // 续播后确实在前进：恢复正常
       _retry = 0;
