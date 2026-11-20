@@ -6,6 +6,7 @@ import 'app.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding.instance.addObserver(vaultController); // 切后台 / 锁屏即上锁
   MediaKit.ensureInitialized();
   // 竖屏为主；播放页单独切横屏
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
