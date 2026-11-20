@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 局域网服务端只提供 HTTP（docs/01-connection.md 第 4 节），地址不固定，故全局允许明文 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
