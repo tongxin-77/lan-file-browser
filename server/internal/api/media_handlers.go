@@ -21,31 +21,41 @@ func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	cur, curOK := episode.ParseWithDir(dir, name)
-	var next *listItem
-	var nextInfo episode.Info
-	for i := range items {
-		it := &items[i]
-		if it.Kind != media.KindVideo {
-			continue
-		}
-		if !curOK { // 无集号：自然排序的下一个
-			if listing.NaturalLess(name, it.Name) {
-				next = it
-				break
-			}
-			continue
-		}
-		if e, ok := episode.ParseWithDir(dir, it.Name); ok && epCompare(e, cur) > 0 &&
-			(next == nil || epCompare(e, nextInfo) < 0) {
-			next, nextInfo = it, e
-		}
-	}
+	next := nextVideo(dir, name, items)
 	if next == nil {
 		writeJSON(w, map[string]any{"item": nil})
 		return
 	}
 	writeJSON(w, map[string]any{"item": mediaItem{*next, path.Join(dir, next.Name)}})
+}
+
+// nextVideo 在同目录条目 items（已自然排序、不含当前文件）中找 name 的下一集（03 文档 4.6）：
+// 当前文件有集号时取集号更大的最小者，能解析出剧名时只看同一部剧（规范化剧名忽略大小写相同）；
+// 当前文件无集号，或其他视频都解析不出集号时，取自然排序的下一个视频。无则返回 nil。
+func nextVideo(dir, name string, items []listItem) *listItem {
+	cur, curOK := episode.ParseWithDir(dir, name)
+	var next, natural *listItem
+	var nextInfo episode.Info
+	anyEpisode := false
+	for i := range items {
+		it := &items[i]
+		if it.Kind != media.KindVideo {
+			continue
+		}
+		if natural == nil && listing.NaturalLess(name, it.Name) {
+			natural = it
+		}
+		e, ok := episode.ParseWithDir(dir, it.Name)
+		anyEpisode = anyEpisode || ok
+		if curOK && ok && (cur.Show == "" || strings.EqualFold(e.Show, cur.Show)) && epCompare(e, cur) > 0 &&
+			(next == nil || epCompare(e, nextInfo) < 0) {
+			next, nextInfo = it, e
+		}
+	}
+	if !curOK || !anyEpisode {
+		return natural
+	}
+	return next
 }
 
 type mediaItem struct {
