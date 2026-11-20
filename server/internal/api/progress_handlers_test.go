@@ -122,8 +122,9 @@ func TestProgressWatchedBoundaryAndClamp(t *testing.T) {
 	}{
 		{2699, 3000, false}, // 89.97%，剩余 301 秒
 		{2700, 3000, true},  // 90%
-		{80, 200, false},    // 剩余恰好 120 秒
-		{81, 200, true},     // 剩余 119 秒
+		{480, 600, false},   // 剩余恰好 120 秒
+		{481, 600, true},    // 剩余 119 秒
+		{81, 200, false},    // 不足 10 分钟：剩余 119 秒仍未看完
 		{1200, 1000, true},  // 超出时长 → 截到时长
 	} {
 		mustPost(t, s, "tok1", "pub", "video.mkv", c.pos, c.dur)

@@ -29,9 +29,10 @@ type Entry struct {
 	Watched  bool
 }
 
-// Watched 为看完判定：position ≥ 90% × duration，或 duration − position < 120 秒；时长未知（≤0）为 false。
+// Watched 为看完判定：position ≥ 90% × duration，或片长 ≥ 10 分钟且 duration − position < 120 秒
+// （短视频只按 90% 判定，避免刚开始播放就算看完）；时长未知（≤0）为 false。
 func Watched(position, duration float64) bool {
-	return duration > 0 && (position >= 0.9*duration || duration-position < 120)
+	return duration > 0 && (position >= 0.9*duration || duration >= 600 && duration-position < 120)
 }
 
 // Key 返回路径的匹配键（反斜杠转 /，转小写）。

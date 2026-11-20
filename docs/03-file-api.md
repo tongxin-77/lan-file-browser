@@ -203,7 +203,7 @@ flowchart LR
 | `POST /api/progress` | Body `{share, path, position, duration}`（秒）。App 播放中每 10 秒、暂停、退出时上报。返回 `204` |
 | `GET /api/continue` | 继续观看列表（最多 20 条）：按「共享+目录」聚合，取所有设备中最近一条；字段 `share, path, name, position, duration, updatedAt, deviceName`；若已看完则附 `next`（4.6 结果），无下一集则不出现 |
 
-- 看完判定：`position ≥ 90% × duration` 或 `duration − position < 120 秒`。
+- 看完判定：`position ≥ 90% × duration`，或 `duration ≥ 10 分钟` 且 `duration − position < 120 秒`（不足 10 分钟的短视频只按 90% 判定）。
 - 仅返回本设备当前可见共享内的记录（不泄露不可见共享）。
 - 存储：SQLite（`modernc.org/sqlite`，纯 Go，无需 cgo），`%APPDATA%\LanFileBrowser\data.db`。表 `progress(device_id, share_id, path_key, path, position, duration, watched, updated_at)`，主键 `(device_id, share_id, path_key)`；`path_key` 为 Go 侧 `strings.ToLower` 结果（SQLite `NOCASE` 只处理 ASCII）。文件改名/删除后的孤儿记录不主动清理，读取时跳过。
 - 01 文档中的 `devices.json` 也可迁入同库，由实现阶段决定。
