@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../models/continue_item.dart';
 import '../models/file_item.dart';
 import '../models/server.dart';
 import '../models/share.dart';
+import '../models/subtitle.dart';
 import 'api_exception.dart';
 
 /// 服务端 HTTP 客户端：Bearer 鉴权、错误 JSON → [ApiException]、
@@ -109,6 +112,97 @@ class LfbClient {
   /// 播放器直接使用的文件 URL（`?t=` 仅 /api/file 等白名单接口有效，01 §3.3）。
   Uri fileUrl(String share, String path) =>
       _uri('/api/file', {'share': share, 'path': path, 't': ?token});
+
+  /// 缩略图 URL（`?t=` 白名单接口）；[width] 为 160/320/640。
+  Uri thumbUrl(String share, String path, int width) => _uri('/api/thumb', {
+    'share': share,
+    'path': path,
+    'w': '$width',
+    't': ?token,
+  });
+
+  /// `GET /api/next`：下一集，无则 null（03 §4.6）。
+  Future<PathItem?> next(String share, String path) async {
+    final res = await _send(
+      'GET',
+      '/api/next',
+      query: {'share': share, 'path': path},
+    );
+    final item = _json(res)['item'];
+    return item is Map ? PathItem.fromJson(item.cast<String, dynamic>()) : null;
+  }
+
+  /// `GET /api/subtitles`：同目录外挂字幕，按 exact/episode/season 排列（03 §4.7）。
+  Future<List<SubtitleInfo>> subtitles(String share, String path) async {
+    final res = await _send(
+      'GET',
+      '/api/subtitles',
+      query: {'share': share, 'path': path},
+    );
+    final items = (_json(res)['items'] as List?) ?? const [];
+    return items
+        .map((e) => SubtitleInfo.fromJson((e as Map).cast<String, dynamic>()))
+        .toList();
+  }
+
+  /// `POST /api/progress`（秒）。
+  Future<void> reportProgress(
+    String share,
+    String path, {
+    required Duration position,
+    required Duration duration,
+  }) async {
+    await _send(
+      'POST',
+      '/api/progress',
+      body: {
+        'share': share,
+        'path': path,
+        'position': position.inMilliseconds / 1000,
+        'duration': duration.inMilliseconds / 1000,
+      },
+    );
+  }
+
+  /// `GET /api/continue`：继续观看（家庭共享进度，03 §4.8）。
+  Future<List<ContinueItem>> continueWatching() async {
+    final res = await _send('GET', '/api/continue');
+    final items = (_json(res)['items'] as List?) ?? const [];
+    return items
+        .map((e) => ContinueItem.fromJson((e as Map).cast<String, dynamic>()))
+        .toList();
+  }
+
+  /// `GET /api/download` 整文件读入内存（用于保存图片；需共享的下载权限）。
+  Future<Uint8List> download(String share, String path) async {
+    final res = await _send(
+      'GET',
+      '/api/download',
+      query: {'share': share, 'path': path},
+      timeout: const Duration(seconds: 60),
+    );
+    return res.bodyBytes;
+  }
+
+  /// 预取文件开头 [bytes] 字节并丢弃（05 §4.4：唤醒电脑硬盘、进系统缓存）。失败静默。
+  Future<void> prefetch(
+    String share,
+    String path, {
+    int bytes = 8 * 1024 * 1024,
+  }) async {
+    final req = http.Request(
+      'GET',
+      _uri('/api/file', {'share': share, 'path': path}),
+    );
+    if (token != null) req.headers['Authorization'] = 'Bearer $token';
+    req.headers['Range'] = 'bytes=0-${bytes - 1}';
+    try {
+      final res = await _http.send(req).timeout(timeout);
+      await res.stream.drain<void>().timeout(const Duration(seconds: 60));
+    } on Object {
+      // 预取只是优化
+    }
+  }
 
   Future<http.Response> _send(
     String method,
