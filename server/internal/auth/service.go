@@ -21,11 +21,13 @@ func New(dataDir string, now func() time.Time) (*Service, error) {
 }
 
 // DeviceFromRequest 从 Authorization: Bearer 取 token 并鉴权；?t= 仅限 GET（含 HEAD）
-// /api/file、/api/download、/api/thumb（供播放器/图片组件直接使用 URL），其他路由只认请求头。
+// /api/file、/api/download、/api/thumb（供播放器/图片组件直接使用 URL）与 /api/app/apk/{abi}（App 下载器），
+// 其他路由只认请求头。
 func (s *Service) DeviceFromRequest(r *http.Request) (string, bool) {
 	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok && (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
-		(r.URL.Path == "/api/file" || r.URL.Path == "/api/download" || r.URL.Path == "/api/thumb") {
+		(r.URL.Path == "/api/file" || r.URL.Path == "/api/download" || r.URL.Path == "/api/thumb" ||
+			strings.HasPrefix(r.URL.Path, "/api/app/apk/")) {
 		tok = r.URL.Query().Get("t")
 	}
 	return s.Store.Lookup(tok)

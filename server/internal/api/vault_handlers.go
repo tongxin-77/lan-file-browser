@@ -37,7 +37,7 @@ func (s *Server) vaultSessions() (*vault.Sessions, time.Duration) {
 func isVault(sh *config.Share) bool { return sh.Vault != nil && sh.Vault.Enabled }
 
 // vaultToken 取请求中的解锁会话：X-Vault 头；?v= 仅限 GET/HEAD 的 /api/file、/api/download、/api/thumb
-// （与 ?t= 白名单一致，见 auth.Service.DeviceFromRequest）。
+// （与 ?t= 白名单一致但不含 /api/app/apk/{abi}，见 auth.Service.DeviceFromRequest）。
 func vaultToken(r *http.Request) string {
 	if v := r.Header.Get("X-Vault"); v != "" {
 		return v
