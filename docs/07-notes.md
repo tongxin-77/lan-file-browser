@@ -9,6 +9,7 @@
 | 符号链接测试 `TestSymlinks`（P1 验收要求） | 开发机无创建符号链接权限 | 开启 Windows“开发者模式”或用管理员终端运行 `go test ./internal/fsx/...` |
 | 并发数据竞争检测 `go test -race` | 需要 cgo，本机 `CGO_ENABLED=0` 且未装 gcc | 安装 gcc（如 MSYS2 mingw-w64），`CGO_ENABLED=1 go test -race ./...` |
 | 8.3 短文件名真实卷测试 | 开发机卷未生成 8.3 短名 | 在开启短名的卷（`fsutil 8dot3name query`）上运行 `TestOpenRejectsShortNames`；当前由第 3 层逻辑测试覆盖 |
+| 检查更新与 APK 缓存（02 §5） | 目前只用伪造的 GitHub 服务验证；release.yml 骨架上传的 APK 名为 Flutter 默认的 `app-<abi>-release.apk`，需改名为 `lfb-app-<abi>.apk` 才能被识别 | 首个真实 Release 发布后，用正式版本号构建服务端实测管理页横幅、安装包下载、`update.mirror` 与 `/api/app/latest`、`/api/app/apk/{abi}` |
 | 真机 / 真电视效果 | 设计稿、图标只在桌面浏览器中验证 | Flutter 端完成后在 Android 手机、电视盒子上实测 |
 
 ## 2. 已接受的安全风险
@@ -41,6 +42,7 @@
 | 管理页：修改片库 | 路径未变时不检查路径是否存在，以便硬盘未连接时仍可改名、改权限 |
 | 管理页：可见手机 | `devices` 为空表示全部可见，因此不允许取消勾选最后一台手机，需改选“全部手机” |
 | 缩略图缓存上限 | 缓存目录暂无 1 GB 上限与按访问时间淘汰（03 §4.5），会持续增长；后续需加后台清理 |
+| 服务端一键更新（02 §5.1 后期） | 本期只做提示 + 手动下载；静默安装（下载 setup.exe → 校验 sha256 → `/VERYSILENT` 启动 → 退出）等 Inno Setup 安装包脚本完成后再做 |
 | 照片缩略图方向 | 未处理 EXIF 旋转，竖拍照片缩略图可能横置；后续需读取 EXIF Orientation 后再缩放 |
 
 ## 4. 构建与环境

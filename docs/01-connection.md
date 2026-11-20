@@ -132,7 +132,7 @@ POST /api/pair
 | 场景 | 携带方式 |
 | ---- | ---- |
 | 普通 API 请求 | `Authorization: Bearer <token>` |
-| 视频/图片 URL（部分播放器不便加 header） | 查询参数 `?t=<token>`，仅限 `GET /api/file`、`GET /api/download`；其他接口只认 `Authorization` 头 |
+| 视频/图片 URL（部分播放器不便加 header） | 查询参数 `?t=<token>`，仅限 `GET /api/file`、`GET /api/download`、`GET /api/thumb`、`GET /api/app/apk/{abi}`；其他接口只认 `Authorization` 头 |
 
 - 服务端对 token 做哈希后查表；无效返回 401，App 清除该服务器 token 并引导重新配对。
 - App 用 `flutter_secure_storage` 保存 token（Android Keystore）。
@@ -155,7 +155,7 @@ POST /api/pair
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | ---- | ---- | ---- | ---- |
-| GET | `/api/ping` | 免鉴权 | 返回 `{id, name, version, needPair}`；带 token 时 `needPair` 反映该 token 是否有效 |
+| GET | `/api/ping` | 免鉴权 | 返回 `{id, name, version, minAppVersion, needPair}`（`minAppVersion` 见 02 §5.3）；带 token 时 `needPair` 反映该 token 是否有效 |
 | POST | `/api/pair` | 免鉴权（凭配对码） | 配对，返回长期 token |
 | GET | `/api/devices` | 仅 127.0.0.1 | 已配对设备列表（本机网页使用） |
 | DELETE | `/api/devices/{id}` | 仅 127.0.0.1 | 吊销设备 |
