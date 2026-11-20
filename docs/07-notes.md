@@ -9,7 +9,9 @@
 | 符号链接测试 `TestSymlinks`（P1 验收要求） | 开发机无创建符号链接权限 | 开启 Windows“开发者模式”或用管理员终端运行 `go test ./internal/fsx/...` |
 | 并发数据竞争检测 `go test -race` | 需要 cgo，本机 `CGO_ENABLED=0` 且未装 gcc | 安装 gcc（如 MSYS2 mingw-w64），`CGO_ENABLED=1 go test -race ./...` |
 | 8.3 短文件名真实卷测试 | 开发机卷未生成 8.3 短名 | 在开启短名的卷（`fsutil 8dot3name query`）上运行 `TestOpenRejectsShortNames`；当前由第 3 层逻辑测试覆盖 |
-| 检查更新与 APK 缓存（02 §5） | 目前只用伪造的 GitHub 服务验证（release.yml 的 APK 命名见第 3 节） | 首个真实 Release 发布后，用正式版本号构建服务端实测管理页横幅、安装包下载、`update.mirror` 与 `/api/app/latest`、`/api/app/apk/{abi}` |
+| 检查更新与 APK 缓存（02 §5） | 目前只用伪造的 GitHub 服务验证 | 首个真实 Release 发布后，用正式版本号构建服务端实测管理页横幅、安装包下载、`update.mirror` 与 `/api/app/latest`、`/api/app/apk/{abi}` |
+| Windows 安装包（02 §6） | 本机只验证了编译（ISCC 6.7）与 exe 图标；安装需 UAC 提权，未实际安装 | 在 Windows 上实测：安装 / 覆盖升级时 `CloseApplications` 能否关闭无窗口的 `lfb-server.exe`（Restart Manager 对无窗口进程可能只能强制结束）、防火墙规则增删、开机自启、开始菜单“打开管理页”、安装完成后启动并打开管理页、卸载时删除 / 保留数据、首次运行自动打开浏览器 |
+| release.yml / ci.yml | 只经 actionlint 检查（本机无 shellcheck，未检查 run 脚本），尚未在 GitHub Actions 上实际运行 | 推送后看 CI 首次运行；首个 tag（可先打 `v0.1.0-beta.1` 预发布）核对产物命名、签名与 checksums |
 | 真机 / 真电视效果 | 设计稿、图标只在桌面浏览器中验证 | Flutter 端完成后在 Android 手机、电视盒子上实测 |
 | App 加密片库与 App 内更新（手机端 P2） | 只有单元 / widget 测试，未构建 APK、未上真机 | 真机验证：FLAG_SECURE（最近任务空白、截屏被拒）、切后台 / 锁屏 / 空闲 10 分钟上锁并停止播放、系统键盘数字 / 字母切换、“安装未知应用”授权引导、FileProvider 调起安装器、强制更新不可关闭 |
 
@@ -43,11 +45,12 @@
 | 管理页：修改片库 | 路径未变时不检查路径是否存在，以便硬盘未连接时仍可改名、改权限 |
 | 管理页：可见手机 | `devices` 为空表示全部可见，因此不允许取消勾选最后一台手机，需改选“全部手机” |
 | 缩略图缓存上限 | 缓存目录暂无 1 GB 上限与按访问时间淘汰（03 §4.5），会持续增长；后续需加后台清理 |
-| 服务端一键更新（02 §5.1 后期） | 本期只做提示 + 手动下载；静默安装（下载 setup.exe → 校验 sha256 → `/VERYSILENT` 启动 → 退出）等 Inno Setup 安装包脚本完成后再做 |
+| 服务端一键更新（02 §5.1 后期） | 本期只做提示 + 手动下载；安装包脚本已完成，静默安装（下载 setup.exe → 校验 sha256 → `/VERYSILENT /SUPPRESSMSGBOXES` 启动 → 退出）可以开始做；注意安装包 `[Run]` 的“启动并打开管理页”带 `skipifsilent`，静默升级后需由安装包或更新逻辑另行重启服务端 |
+| 托盘图标（02 §6） | 未做：`-H windowsgui` 构建后没有窗口也没有托盘，只能通过开始菜单“打开管理页”、任务管理器结束进程；托盘（打开管理网页 / 显示二维码 / 退出）需后续实现 |
 | 整理：占用超过 24 小时提示（06 §4.2） | 未做“文件已稳定超过 24 小时仍被占用 → 状态列表显示‘被其他程序占用（可能在做种）’及处理建议”；目前只有试运行统一显示“被其他程序占用（可能在下载或做种）” |
 | 整理：管理页入口（06 §10） | “设置”页的整理全局默认值界面、新建片库时“作为自动整理库”选项均未做；接口已有（`GET/PUT /api/admin/organize/defaults`、`PUT /api/admin/shares/{id}/organize`） |
 | APK 缓存状态 | 只在内存中，服务端重启后需再成功检查一次更新才会重新提供 `/api/app/apk/{abi}`（02 §5.2） |
-| release.yml 的 APK 命名 | Flutter 默认产物为 `app-<abi>-release.apk`，上传 Release 前需改名为 `lfb-app-<abi>.apk`，否则服务端检查更新时识别不到 APK |
+| ~~release.yml 的 APK 命名~~ | ~~Flutter 默认产物需改名为 `lfb-app-<abi>.apk`~~：release.yml 已改名（02 §3） |
 | App：FLAG_SECURE 范围 | 实现为“片库解锁期间整个窗口防截屏”（含解锁后首页、普通共享），比 04 §8 的“处于片库内”更严，避免首页片库名出现在最近任务缩略图 |
 | App：片库内容不落盘 | 本地缓存（缩略图磁盘缓存、最近播放等）写入前须用 `LfbClient.isVaultShare(shareId)` 判断并跳过；上锁时已清空 Flutter 图片内存缓存 |
 | App：minServerVersion | `lib/services/app_update.dart` 常量，初值 `0.0.0`；App 开始依赖新增服务端接口时提升 |
@@ -61,7 +64,10 @@
 | `golang.org/x/sys` | 固定 v0.46.0，更高版本要求 Go 1.26；升级前同步调整 `go.mod` 的 go 版本 |
 | 仅 Windows 可编译 | 服务端依赖 `golang.org/x/sys/windows`，CI 必须使用 Windows runner（02 已按此设计） |
 | 无零拷贝 | 桌面版 Windows 上 Go 不走 TransmitFile，属预期行为（05 §3） |
-| git 仓库 | 公开仓库 https://github.com/tongxin-77/lan-file-browser（Apache-2.0）；本机 ssh 推送需先把 github.com 主机密钥加入 known_hosts（`ssh -T git@github.com` 核对指纹），或 `gh auth refresh -s workflow` 后用 HTTPS 推送（推 `.github/workflows/` 需要 workflow 权限） |
+| git 仓库 | 公开仓库 https://github.com/tongxin-77/lan-file-browser（Apache-2.0）；本机 ssh 推送需先把 github.com 主机密钥加入 known_hosts（`ssh -T git@github.com` 核对指纹），或 `gh auth refresh -s workflow` 后用 HTTPS 推送。**当前 gh token 缺 workflow 权限**：经 gh 凭据走 HTTPS 推送含 `.github/workflows/` 改动的提交会被拒绝，需先 `gh auth refresh -h github.com -s workflow`（浏览器授权）或改用 ssh；只推 tag 不受影响 |
+| Android 发布 keystore | 开发机 `%USERPROFILE%\.lfb-signing\release.jks`（PKCS12，RSA 4096，别名 `lfb`，30 年），密码在同目录 `signing.txt`，只在本机，不进仓库；已设置仓库 Secrets `ANDROID_KEYSTORE_BASE64` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD`。**必须把 `release.jks` 与 `signing.txt` 离线备份**（如加密 U 盘 + 密码管理器）：丢失后已安装的 App 无法覆盖升级 |
+| CI 中的 Flutter 版本 | release.yml / ci.yml 固定 Flutter 3.50.1（与开发机一致），本地升级 Flutter 时同步修改两个 workflow |
+| CI 的 Gradle 镜像 | `app/android` 的 Gradle 仓库优先阿里云镜像、官方仓库兜底，GitHub runner 上也可用；若 CI 下载慢可改为仅在本机启用镜像 |
 
 ## 5. 播放相关待实测（见 05）
 
@@ -73,5 +79,5 @@
 ## 6. 设计稿相关
 
 - 手机 a4 的字母键盘按键宽度小于 48dp 触控下限，实现时改用系统键盘。
-- 图标 2 尚未转换为 Android VectorDrawable，也未在真机启动器上验证。
+- 图标 2 已渲染为 Android 自适应图标（前景 / 背景 / 单色 PNG 图层，`mipmap-anydpi-v26`）与旧版 `ic_launcher.png`、Windows `lfb.ico`，均未在真机启动器 / 桌面上验证；未转 VectorDrawable。
 - 设计稿示例数据“第 12 集看到 70%”与“还剩 6 分钟”不一致，实现时以真实进度计算为准。

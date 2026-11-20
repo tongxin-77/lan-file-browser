@@ -13,6 +13,7 @@
 *.gif binary
 *.webp binary
 *.ico binary
+*.syso binary
 *.jks binary
 *.keystore binary
 *.exe binary

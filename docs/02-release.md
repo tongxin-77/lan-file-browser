@@ -1,7 +1,7 @@
 # 02 · 发布设计：GitHub Release 与自动更新
 
 > 范围：代码上传 GitHub 后，如何打 tag 自动构建并发布 Release，以及服务端 / App 如何检查并更新。
-> 不含：workflow 完整实现（本文仅给骨架）。只做 Android，不涉及 iOS。
+> 实现：`.github/workflows/release.yml`（发布）、`.github/workflows/ci.yml`（main 分支检查）、`server/installer/lfb-server.iss`（安装包）。只做 Android，不涉及 iOS。
 
 ## 1. 仓库结构
 
@@ -10,6 +10,7 @@
 | 文件 | 作用 |
 | ---- | ---- |
 | `.github/workflows/release.yml` | push tag `v*` 触发构建与发布 |
+| `.github/workflows/ci.yml` | push / PR 到 main：服务端 gofmt、go vet、go test（windows-latest）；App dart format、flutter analyze、flutter test（ubuntu-latest） |
 | `.gitignore`（根目录） | 忽略 Go 的 `dist/`、Flutter 的 `build/` `.dart_tool/` `.flutter-plugins*`、运行数据 `data/`、签名文件 `*.jks` `key.properties` |
 | 版本来源 | **以 git tag 为准**，不另设 `VERSION` 文件（避免两处不一致）；本地开发版本默认 `dev` |
 
@@ -23,7 +24,7 @@
 | 格式 | `vMAJOR.MINOR.PATCH`；预发布用 `v1.2.0-beta.1`（Release 标记为 prerelease） |
 | MAJOR | 接口不兼容变更（需同时升级两端） |
 | MINOR / PATCH | 向后兼容的功能 / 修复 |
-| Go 注入 | `go build -ldflags "-s -w -X main.version=1.2.0"` |
+| Go 注入 | `go build -ldflags "-s -w -H windowsgui -X main.version=1.2.0"` |
 | Flutter 注入 | `flutter build apk --build-name=1.2.0 --build-number=${{ github.run_number }}`（覆盖 `pubspec.yaml` 中 version） |
 
 > 注：Android 的 `versionCode` 必须单调递增，用 `run_number` 可保证；分 abi 构建时 Flutter 会自动给不同 abi 加偏移。
@@ -37,67 +38,32 @@ push tag v* ──┬─> job server (windows, Go 编译 + Inno Setup 打安装�
 
 | Job | 内容 | 产物 |
 | ---- | ---- | ---- |
-| server | windows-latest 上编译 exe，用 Inno Setup（runner 已预装）编译 `server/installer/lfb-server.iss` | `lfb-server-setup-<版本>.exe`（安装包） |
-| app | `flutter build apk --release --split-per-abi` | `lfb-app-arm64-v8a.apk`、`lfb-app-armeabi-v7a.apk` |
-| release | 下载 artifacts → 生成 `checksums.txt`（sha256）→ `softprops/action-gh-release` 上传，`generate_release_notes: true` 自动生成 changelog | GitHub Release 页面 |
+| server | windows-latest：`setup-go`（`go-version-file: server/go.mod`）→ `go test ./...` → `go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=<版本>"` → `iscc /DAppVersion=<版本> installer\lfb-server.iss`（Inno Setup 6 为 runner 预装，`iscc` 在 PATH 中；在 pwsh 中执行，避免 Git Bash 把 `/D` 当路径转换） | `lfb-server-setup-<版本>.exe`（安装包） |
+| app | ubuntu-latest：Java 17（temurin）+ `subosito/flutter-action`（stable，固定 3.50.1）→ 从 Secrets 写入 keystore 与 `key.properties` → `flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --build-name=<版本> --build-number=<run_number>` → 把 `app-<abi>-release.apk` 改名 | `lfb-app-arm64-v8a.apk`、`lfb-app-armeabi-v7a.apk`（x86_64 不发布） |
+| release | 下载两个 artifact → `sha256sum lfb-server-setup-*.exe lfb-app-*.apk > checksums.txt` → `softprops/action-gh-release` 上传，`generate_release_notes: true`；tag 含 `-`（如 `v0.1.0-beta.1`）时 `prerelease: true` | GitHub Release 页面 |
+
+`<版本>` 为 tag 去掉前缀 `v`。资产名必须与 `server/internal/update` 的识别规则一致：安装包 `lfb-server-setup-*.exe`、APK `lfb-app-<abi>.apk`、`checksums.txt`（`<sha256>  <文件名>`）。
+
+第三方 action 均固定主版本：`actions/checkout@v7`、`actions/setup-go@v7`、`actions/setup-java@v6`、`subosito/flutter-action@v2`、`actions/upload-artifact@v7`、`actions/download-artifact@v8`、`softprops/action-gh-release@v3`（2026-11 时的最新主版本）。workflow 顶层权限 `contents: read`，只有 release job 为 `contents: write`。
 
 APK 签名：
 
 | Secret | 说明 |
 | ---- | ---- |
-| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 release.jks` 的结果，CI 中解码回 `app/android/release.jks` |
-| `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD` | CI 中写入 `key.properties`，由 `build.gradle` 读取 |
+| `ANDROID_KEYSTORE_BASE64` | `release.jks` 的 base64，CI 中解码回 `app/android/release.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD` | CI 中写入 `app/android/key.properties`（`storeFile=release.jks`，相对 `app/android/`），由 `app/android/app/build.gradle.kts` 读取；任一 Secret 为空时 job 失败 |
+
+- `key.properties` 不存在时 release 构建回退到 debug 签名（便于本地开发）；本地要出正式签名的 APK，在 `app/android/key.properties` 中把 `storeFile` 写成 keystore 的绝对路径。
+- keystore 为 PKCS12、RSA 4096、别名 `lfb`、有效期 30 年，存放在仓库之外（位置与备份见 07-notes §4）。
 
 > keystore 务必离线备份：丢失后无法以同签名覆盖安装，用户只能卸载重装。
-
-workflow 骨架（示意，非完整实现）：
-
-```yaml
-on: { push: { tags: ['v*'] } }
-permissions: { contents: write }
-jobs:
-  server:
-    runs-on: windows-latest
-    defaults: { run: { shell: bash } }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version-file: server/go.mod }
-      - run: |
-          V=${GITHUB_REF_NAME#v}
-          cd server && go build -ldflags "-s -w -H windowsgui -X main.version=$V" \
-            -o dist/lfb-server.exe ./cmd/server
-          iscc //DAppVersion=$V installer/lfb-server.iss   # 输出 dist/lfb-server-setup-$V.exe
-      - uses: actions/upload-artifact@v4
-        with: { name: server, path: server/dist/*-setup-*.exe }
-  app:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with: { channel: stable }
-      - run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > app/android/release.jks
-      - run: cd app && flutter build apk --release --split-per-abi
-               --build-name=${GITHUB_REF_NAME#v} --build-number=${{ github.run_number }}
-      - uses: actions/upload-artifact@v4
-        with: { name: app, path: app/build/app/outputs/flutter-apk/*-release.apk }
-  release:
-    needs: [server, app]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { path: out, merge-multiple: true }
-      - run: cd out && sha256sum * > checksums.txt
-      - uses: softprops/action-gh-release@v2
-        with: { files: out/*, generate_release_notes: true }
-```
 
 ## 4. 发版操作
 
 | 步骤 | 命令 / 动作 |
 | ---- | ---- |
 | 1 | 确认 main 分支已合并、测试通过 |
-| 2 | `git tag v1.2.0 && git push origin v1.2.0` |
+| 2 | `git tag -a v1.2.0 -m v1.2.0 && git push origin v1.2.0`（推送 tag 只需 contents 权限；推送 `.github/workflows/` 的改动才需要 workflow 权限） |
 | 3 | 等待 Actions 完成，检查 Release 页面产物与 checksums |
 | 4 | 如需修正：删除 Release 与 tag 后重打（仅限未被用户拉取前） |
 
@@ -158,14 +124,20 @@ jobs:
 
 | 项 | 设计 |
 | ---- | ---- |
-| 权限 | `PrivilegesRequired=admin`（添加防火墙规则需要管理员） |
+| 权限 | `PrivilegesRequired=admin`（添加防火墙规则需要管理员）；仅 x64 |
 | 安装目录 | `C:\Program Files\LanFileBrowser\` |
-| 数据目录 | `%APPDATA%\LanFileBrowser\`（配置、`devices.json`），与程序目录分开，覆盖安装不丢数据；卸载时询问是否删除 |
-| 防火墙 | 安装时执行 `netsh advfirewall firewall add rule ...`：TCP 8686、UDP 8687；卸载时删除规则 |
-| 开机自启 | 安装页可勾选，写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`。**不做 Windows 服务**：服务以 SYSTEM 运行，看不到用户映射的网络盘，也无法显示托盘 |
-| 运行形态 | 无控制台窗口（`-H windowsgui`）+ 托盘图标：打开管理网页 / 显示二维码 / 退出 |
+| 数据目录 | `%APPDATA%\LanFileBrowser\`（配置、`devices.json`、`data.db`、无控制台运行时的日志 `logs\server.log`），缩略图缓存在 `%LOCALAPPDATA%\LanFileBrowser\`；与程序目录分开，覆盖安装不丢数据；卸载时询问是否删除这两个目录（默认“否”，静默卸载保留） |
+| 防火墙 | 安装时 `netsh advfirewall firewall add rule`：入站 TCP 8686、UDP 8687（规则名 `LAN File Browser (TCP 8686)` / `(UDP 8687)`，限定程序 `lfb-server.exe`，所有网络类型），先删同名规则再添加；卸载时删除 |
+| 开机自启 | 安装页可勾选（默认不勾），写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，卸载时删除。**不做 Windows 服务**：服务以 SYSTEM 运行，看不到用户映射的网络盘，也无法显示托盘 |
+| 开始菜单 | 启动服务端、“打开管理页”（`http://127.0.0.1:8686/` 的 URL 快捷方式）、卸载 |
+| 安装完成 | 可选“启动并打开管理页”：以安装者本人（非提升权限）运行 `lfb-server.exe -no-browser`，等 `/api/ping` 就绪（最多约 10 秒）后打开管理页 |
+| 运行形态 | 无控制台窗口（`-H windowsgui`）；日志写入数据目录 `logs\server.log`（超过 10MB 启动时轮换为 `.1`）；首次运行（数据目录下尚无 `config.json`）时自动用默认浏览器打开管理页，`-no-browser` 禁用。托盘图标（打开管理网页 / 显示二维码 / 退出）**尚未实现** |
+| 图标 | `server/installer/lfb.ico`（图标 2，16–256 多尺寸）：安装包 `SetupIconFile`；exe 通过 `server/cmd/server/rsrc_windows_amd64.syso` 嵌入（`go run github.com/akavel/rsrc@v0.10.2 -arch amd64 -ico installer/lfb.ico -o cmd/server/rsrc_windows_amd64.syso` 生成，更换图标时重新生成） |
+| 界面语言 | 简体中文：`server/installer/ChineseSimplified.isl`（Inno Setup 非官方翻译，官方安装包不带，随仓库提供），需 Inno Setup 6.5+ |
 | 升级 | `AppId` 固定，同 AppId 覆盖安装；`CloseApplications=yes` 自动关闭运行中的旧进程 |
-| 卸载 | 开始菜单 + “设置 → 应用”中的卸载项 |
+| 卸载 | 开始菜单 + “设置 → 应用”中的卸载项；卸载前结束 `lfb-server.exe` 进程 |
+
+本地编译安装包（在 `server/` 下）：`go build -ldflags "-s -w -H windowsgui -X main.version=0.1.0" -o dist/lfb-server.exe ./cmd/server`，再 `iscc /DAppVersion=0.1.0 installer\lfb-server.iss`，输出 `dist\lfb-server-setup-0.1.0.exe`。
 
 > 安装包未做代码签名，首次运行 SmartScreen 会提示“未知发布者”，需点“仍要运行”；后期可考虑购买代码签名证书。
 
