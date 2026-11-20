@@ -107,6 +107,7 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	items := make([]listItem, 0, len(entries))
 	for _, e := range entries {
 		if it, ok := entryItem(sh, rel, e); ok {
+			it.HasThumb = it.Kind != media.KindDir && s.hasThumb(it.Name)
 			items = append(items, it)
 		}
 	}

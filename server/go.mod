@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/mdp/qrterminal/v3 v3.2.1
+	golang.org/x/image v0.44.0
 	golang.org/x/sys v0.46.0
 	modernc.org/sqlite v1.55.0
 	rsc.io/qr v0.2.0
