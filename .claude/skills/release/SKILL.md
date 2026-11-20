@@ -35,7 +35,8 @@ bash .claude/skills/release/scripts/preflight.sh vX.Y.Z
 逐项执行并记录结果，任一失败即停止并报告：
 
 1. 服务端（在 `server/` 下）：`gofmt -l .` 无输出、`go vet ./...`、`go test ./...` 全部通过。
-2. App（在 `app/` 下）：`flutter analyze`、`flutter test` 通过。
+2. App（在 `app/` 下，Flutter 在 `C:\Users\<用户>\flutter\bin` 时先加入 PATH）：`dart format --output=none --set-exit-if-changed lib test`、`flutter analyze`、`flutter test` 通过。
+   另看 main 上最近一次 CI（`ci.yml`）是否通过：`gh run list --repo <repo> --workflow ci.yml --branch main --limit 1`。
 3. 阅读 `docs/07-notes.md`，列出与本次发布相关的阻塞/风险项给用户判断，至少包括：
    - §1 尚未验证的测试（符号链接、`-race`、8.3 短名、真机/电视实测）——本次是否需要先补测；
    - §3 中本次新增功能涉及的“后续实现须知”是否已落实（如新增 `/api/thumb` 是否加入 `?t=` 白名单、日志脱敏、管理接口 `adminWrite`）。
@@ -49,8 +50,7 @@ bash .claude/skills/release/scripts/preflight.sh vX.Y.Z
 ## 3. minAppVersion 判断
 
 - 本次是否有 App 必须升级才能正常使用的变更（MAJOR，或服务端移除/改变了旧 App 依赖的接口）？
-  - 是：需要提升服务端返回的 `minAppVersion`（02 §5.3）；同理检查 App 内常量 `minServerVersion` 是否需提升。
-  - 注意：目前 `/api/ping` 尚未返回 `minAppVersion`（02 §7 二期）。若本次需要强制升级而该字段未实现，告知用户：要么先实现，要么在 Release Notes 中显著提示手动升级。
+  - 是：需要提升服务端常量 `MinAppVersion`（`server/internal/api/update_handlers.go`，`/api/ping` 与 `/api/app/latest` 返回，02 §5.3）；同理检查 App 常量 `minServerVersion`（`app/lib/services/app_update.dart`）是否需提升。
 - 结论告诉用户并确认。
 
 ## 4. 打 tag 并推送（对外发布，需用户确认）
@@ -68,6 +68,8 @@ git push origin vX.Y.Z
 gh run list --repo <repo> --workflow release.yml --limit 3
 gh run watch <run-id> --repo <repo>
 ```
+
+推送 tag 不需要 gh 的 workflow 权限（只有推送 `.github/workflows/` 的改动才需要，见 07-notes §4）。
 
 CI 失败：报告失败的 job 与日志要点，按第 7 步回滚，不要在未修复的情况下重推同名 tag。
 
@@ -101,8 +103,8 @@ cd <scratchpad>/vX.Y.Z && sha256sum -c checksums.txt
    ```sh
    gh api repos/<repo>/releases/latest --jq .tag_name   # 应为 vX.Y.Z
    ```
-2. 服务端更新提示（02 §5.1）若已实现：用旧版本安装包运行，本机管理页 `http://127.0.0.1:8686/` 顶部应出现新版本横幅；未实现则如实说明“未验证”。
-3. App 更新检查（02 §5.2，二期）若已实现：旧版 App 应提示新版本、下载的 APK sha256 与 `checksums.txt` 一致；未实现则如实说明。
+2. 服务端更新提示（02 §5.1，已实现）：用旧版本安装包运行，本机管理页 `http://127.0.0.1:8686/` 顶部应出现新版本横幅；未实测则如实说明“未验证”。
+3. App 更新检查（02 §5.2，已实现）：旧版 App 应提示新版本（经服务端 `/api/app/latest`，服务端需先检查到新版本并缓存 APK）、下载的 APK sha256 与 `checksums.txt` 一致；未实测则如实说明。
 4. 建议用户在一台 Windows 上覆盖安装 exe、在一台 Android 设备上覆盖安装 APK（验证签名一致、可覆盖升级、配置与数据保留）。
 
 ## 7. 出错回滚（对外操作，需用户确认）
@@ -121,4 +123,4 @@ git tag -d vX.Y.Z                              # 删除本地 tag
 
 ## 汇报
 
-给出：版本号与 Release 链接、产物列表与大小、checksums 校验结果、`releases/latest` 验证结果、07-notes 中未解决的风险项；如实说明哪些更新检查功能尚未实现或未经手动验证。
+给出：版本号与 Release 链接、产物列表与大小、checksums 校验结果、`releases/latest` 验证结果、07-notes 中未解决的风险项；如实说明哪些更新检查功能未经手动验证。
