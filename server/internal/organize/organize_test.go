@@ -700,6 +700,20 @@ func TestShellRecyclerReal(t *testing.T) {
 	}
 }
 
+// 路径尚不存在时按最近的已存在祖先解析（联接、8.3 短名），不能退化为原样比较。
+func TestNestedMissingUnderJunction(t *testing.T) {
+	base := t.TempDir()
+	lib := filepath.Join(base, "lib")
+	os.MkdirAll(lib, 0o755)
+	mklinkJ(t, filepath.Join(base, "j"), lib)
+	if !Nested(lib, filepath.Join(base, "j", "x", "y")) {
+		t.Fatal("联接下不存在的子路径应判为嵌套")
+	}
+	if Nested(filepath.Join(base, "j", "x"), filepath.Join(base, "other")) {
+		t.Fatal("不相关路径不应判为嵌套")
+	}
+}
+
 func TestDiskKeyAndCheckPath(t *testing.T) {
 	dir := t.TempDir()
 	k := diskKey(dir)
