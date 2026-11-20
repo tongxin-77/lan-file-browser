@@ -11,6 +11,7 @@
 | 8.3 短文件名真实卷测试 | 开发机卷未生成 8.3 短名 | 在开启短名的卷（`fsutil 8dot3name query`）上运行 `TestOpenRejectsShortNames`；当前由第 3 层逻辑测试覆盖 |
 | 检查更新与 APK 缓存（02 §5） | 目前只用伪造的 GitHub 服务验证（release.yml 的 APK 命名见第 3 节） | 首个真实 Release 发布后，用正式版本号构建服务端实测管理页横幅、安装包下载、`update.mirror` 与 `/api/app/latest`、`/api/app/apk/{abi}` |
 | 真机 / 真电视效果 | 设计稿、图标只在桌面浏览器中验证 | Flutter 端完成后在 Android 手机、电视盒子上实测 |
+| App 加密片库与 App 内更新（手机端 P2） | 只有单元 / widget 测试，未构建 APK、未上真机 | 真机验证：FLAG_SECURE（最近任务空白、截屏被拒）、切后台 / 锁屏 / 空闲 10 分钟上锁并停止播放、系统键盘数字 / 字母切换、“安装未知应用”授权引导、FileProvider 调起安装器、强制更新不可关闭 |
 
 ## 2. 已接受的安全风险
 
@@ -47,6 +48,9 @@
 | 整理：管理页入口（06 §10） | “设置”页的整理全局默认值界面、新建片库时“作为自动整理库”选项均未做；接口已有（`GET/PUT /api/admin/organize/defaults`、`PUT /api/admin/shares/{id}/organize`） |
 | APK 缓存状态 | 只在内存中，服务端重启后需再成功检查一次更新才会重新提供 `/api/app/apk/{abi}`（02 §5.2） |
 | release.yml 的 APK 命名 | Flutter 默认产物为 `app-<abi>-release.apk`，上传 Release 前需改名为 `lfb-app-<abi>.apk`，否则服务端检查更新时识别不到 APK |
+| App：FLAG_SECURE 范围 | 实现为“片库解锁期间整个窗口防截屏”（含解锁后首页、普通共享），比 04 §8 的“处于片库内”更严，避免首页片库名出现在最近任务缩略图 |
+| App：片库内容不落盘 | 本地缓存（缩略图磁盘缓存、最近播放等）写入前须用 `LfbClient.isVaultShare(shareId)` 判断并跳过；上锁时已清空 Flutter 图片内存缓存 |
+| App：minServerVersion | `lib/services/app_update.dart` 常量，初值 `0.0.0`；App 开始依赖新增服务端接口时提升 |
 | 照片缩略图方向 | 未处理 EXIF 旋转，竖拍照片缩略图可能横置；后续需读取 EXIF Orientation 后再缩放 |
 
 ## 4. 构建与环境
