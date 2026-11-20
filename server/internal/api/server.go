@@ -8,6 +8,7 @@ import (
 
 	"lfb/server/internal/activity"
 	"lfb/server/internal/config"
+	"lfb/server/internal/thumb"
 	"lfb/server/internal/web"
 )
 
@@ -20,6 +21,7 @@ type Server struct {
 	// P2 依赖（测试中可为 nil，使用前判空）
 	Store    *sql.DB           // data.db，表由 internal/store 的迁移创建
 	Activity *activity.Tracker // 活跃播放跟踪（05 文档 3.4）
+	Thumbs   *thumb.Service    // 缩略图生成与缓存（03 文档 4.5）
 }
 
 // port 返回实际监听端口。
