@@ -173,6 +173,7 @@ type continueItem struct {
 	Share, Path, Name, UpdatedAt, DeviceName string
 	Position, Duration                       float64
 	Watched                                  bool
+	Next                                     *struct{ Name, Path, Kind string }
 }
 
 func getContinue(t *testing.T, s *Server, tok string) []continueItem {
@@ -195,6 +196,7 @@ func TestContinue(t *testing.T) {
 	tok2, _ := svc.Store.Add("dev2", "手机")
 	s.Auth = svc
 
+	writeFiles(t, root, "Z目录/y.mp4")                   // 让看完的 x.mp4 有下一集
 	mustPost(t, s, tok1, "priv", "video.mkv", 10, 100) // 仅 dev1 可见的共享
 	mustPost(t, s, tok1, "pub", "第1集.mkv", 30, 100)
 	time.Sleep(5 * time.Millisecond)
@@ -209,6 +211,12 @@ func TestContinue(t *testing.T) {
 	}
 	if it := items[0]; it.Name != "x.mp4" || it.DeviceName != "客厅电视" || !it.Watched || it.Position != 95 || it.UpdatedAt == "" {
 		t.Errorf("条目字段 = %+v", it)
+	}
+	if n := items[0].Next; n == nil || n.Path != "Z目录/y.mp4" || n.Name != "y.mp4" || n.Kind != "video" {
+		t.Errorf("看完的条目应附下一集: %+v", n)
+	}
+	if items[1].Next != nil {
+		t.Errorf("未看完的条目不应有 next: %+v", items[1].Next)
 	}
 	for _, it := range items {
 		if it.Share == "priv" {
@@ -256,5 +264,19 @@ func TestContinueLimit(t *testing.T) {
 	s.Store = nil
 	if items := getContinue(t, s, "tok2"); len(items) != 0 {
 		t.Fatalf("无存储: %+v", items)
+	}
+}
+
+// 看完且无下一集的条目不出现，同目录较早的记录也不补位。
+func TestContinueWatchedWithoutNext(t *testing.T) {
+	s, _ := newProgressServer(t)
+	writeFiles(t, s.Config.Get().Shares[0].Path, "Z目录/a.mp4")
+	mustPost(t, s, "tok2", "pub", "Z目录/a.mp4", 50, 100)
+	time.Sleep(5 * time.Millisecond)
+	mustPost(t, s, "tok2", "pub", "Z目录/x.mp4", 99, 100) // x.mp4 是自然排序最后一个
+	mustPost(t, s, "tok2", "pub", "第1集.mkv", 95, 100)   // 看完，有 第2集
+	items := getContinue(t, s, "tok2")
+	if len(items) != 1 || items[0].Path != "第1集.mkv" || items[0].Next == nil || items[0].Next.Path != "第2集.mkv" {
+		t.Fatalf("continue = %+v", items)
 	}
 }

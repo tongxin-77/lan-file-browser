@@ -113,17 +113,18 @@ func (s *Server) fillProgress(ctx context.Context, dev, share, dirRel string, it
 
 // GET /api/continue —— 按「共享+目录」聚合，取所有设备中最近一条（家庭共享进度），最多 20 条。
 // 只含当前设备可见的共享；文件已不存在（含对本设备隐藏、共享离线）的记录跳过，由同目录较早的记录补位。
+// 已看完的条目附 next（下一集）；无下一集则不出现。
 func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
 	type item struct {
-		Share      string  `json:"share"`
-		Path       string  `json:"path"`
-		Name       string  `json:"name"`
-		Position   float64 `json:"position"`
-		Duration   float64 `json:"duration"`
-		Watched    bool    `json:"watched"`
-		UpdatedAt  string  `json:"updatedAt"`
-		DeviceName string  `json:"deviceName"`
-		// TODO(next): 已看完时附 next（03 文档 4.6 的结果），待 internal/episode 与 /api/next 合并后接入。
+		Share      string     `json:"share"`
+		Path       string     `json:"path"`
+		Name       string     `json:"name"`
+		Position   float64    `json:"position"`
+		Duration   float64    `json:"duration"`
+		Watched    bool       `json:"watched"`
+		UpdatedAt  string     `json:"updatedAt"`
+		DeviceName string     `json:"deviceName"`
+		Next       *mediaItem `json:"next,omitempty"` // 已看完时的下一集（03 文档 4.6）
 	}
 	dev := DeviceID(r.Context())
 	shares := map[string]*config.Share{}
@@ -152,8 +153,23 @@ func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
 				return true
 			}
 			seen[group] = true
-			items = append(items, item{rec.Share, rec.Path, path.Base(rec.Path), rec.Position, rec.Duration, rec.Watched,
-				rec.UpdatedAt.UTC().Format(time.RFC3339), names[rec.Device]})
+			it := item{rec.Share, rec.Path, path.Base(rec.Path), rec.Position, rec.Duration, rec.Watched,
+				rec.UpdatedAt.UTC().Format(time.RFC3339), names[rec.Device], nil}
+			if rec.Watched {
+				// 看完：附下一集；无下一集则整条不出现（同目录较早的记录也不补位）
+				dir, name := path.Split(rec.Path)
+				dir = strings.TrimSuffix(dir, "/")
+				sib, err := siblingFiles(shares[rec.Share], dir, name)
+				if err != nil {
+					return true
+				}
+				n := nextVideo(dir, name, sib)
+				if n == nil {
+					return true
+				}
+				it.Next = &mediaItem{*n, path.Join(dir, n.Name)}
+			}
+			items = append(items, it)
 			return len(items) < maxContinue
 		})
 		if err != nil {
