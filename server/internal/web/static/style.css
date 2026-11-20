@@ -215,3 +215,14 @@ dialog::backdrop{background:rgba(26,17,22,.75)}
 .facts b.ok{color:var(--aisle);font:600 15px var(--cn)}
 .off-note{color:var(--dim);font-size:14px;margin:14px 0 0}
 .ticket .btn.ghost:disabled{opacity:.5;cursor:default}
+
+/* 加密片库（vault.js）：海报右上角小锁；电影海报右侧是竖排片名，挪到左边胶片孔旁 */
+.vault-mark{position:absolute;right:7px;top:7px;z-index:2;display:flex;align-items:center;gap:4px;padding:3px 7px 3px 6px;border-radius:999px;background:rgba(36,24,32,.82);border:1px solid rgba(233,180,76,.45);color:var(--aisle);font:600 11px/1 var(--cn)}
+.vault-mark svg{width:10px;height:11px;flex:none}
+.c-movie .vault-mark{right:auto;left:22px}
+.vault{margin-top:18px;padding-top:4px;border-top:1px solid var(--line)}
+.vault .perm{border-bottom:0}
+.vault-on{background:var(--hall-2);border-radius:8px;padding:12px 14px}
+.vault-on p{margin:0 0 10px;color:var(--dim);font-size:13px;line-height:1.6}
+.vault-on p strong{color:var(--screen);font-weight:600}
+.vault-on .btn{padding:6px 12px;font-size:13px;margin-right:8px}

@@ -118,6 +118,7 @@ type adminShare struct {
 	Perms   config.Perms `json:"perms"`
 	Devices []string     `json:"devices"` // 空 = 全部手机
 	Status  string       `json:"status"`  // ok / offline
+	Vault   bool         `json:"vault"`   // 加密片库（04）；管理页始终显示全部片库
 }
 
 func toAdminShare(sh config.Share) adminShare {
@@ -125,7 +126,7 @@ func toAdminShare(sh config.Share) adminShare {
 	if devices == nil {
 		devices = []string{}
 	}
-	return adminShare{sh.ID, sh.Name, sh.Path, sh.Perms, devices, shareStatus(sh.Path)}
+	return adminShare{sh.ID, sh.Name, sh.Path, sh.Perms, devices, shareStatus(sh.Path), isVault(&sh)}
 }
 
 // GET /api/admin/shares

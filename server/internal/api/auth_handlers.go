@@ -106,6 +106,8 @@ func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
 	case !found:
 		writeError(w, CodeNotFound, "设备不存在")
 	default:
+		sess, _ := s.vaultSessions()
+		sess.DropDevice(r.PathValue("id")) // 吊销设备即销毁其解锁会话（04 文档第 5 节）
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
