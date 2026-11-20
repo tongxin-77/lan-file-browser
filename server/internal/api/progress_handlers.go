@@ -56,7 +56,7 @@ func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
 	dev := DeviceID(r.Context())
 	var sh *config.Share
 	for _, x := range s.allShares() {
-		if x.ID == in.Share && visible(&x, dev) {
+		if x.ID == in.Share && s.accessible(r, &x) {
 			sh = &x
 			break
 		}
@@ -112,7 +112,7 @@ func (s *Server) fillProgress(ctx context.Context, dev, share, dirRel string, it
 }
 
 // GET /api/continue —— 按「共享+目录」聚合，取所有设备中最近一条（家庭共享进度），最多 20 条。
-// 只含当前设备可见的共享；文件已不存在（含对本设备隐藏、共享离线）的记录跳过，由同目录较早的记录补位。
+// 只含当前设备可见的共享（加密片库需有效会话）；文件已不存在（含对本设备隐藏、共享离线）的记录跳过，由同目录较早的记录补位。
 // 已看完的条目附 next（下一集）；无下一集则不出现。
 func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
 	type item struct {
@@ -126,11 +126,10 @@ func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
 		DeviceName string     `json:"deviceName"`
 		Next       *mediaItem `json:"next,omitempty"` // 已看完时的下一集（03 文档 4.6）
 	}
-	dev := DeviceID(r.Context())
 	shares := map[string]*config.Share{}
 	var ids []string
 	for _, sh := range s.allShares() {
-		if visible(&sh, dev) {
+		if s.accessible(r, &sh) { // 加密片库仅在带有效 X-Vault 时合并返回
 			shares[sh.ID] = &sh
 			ids = append(ids, sh.ID)
 		}

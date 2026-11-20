@@ -22,6 +22,8 @@ type Server struct {
 	Store    *sql.DB           // data.db，表由 internal/store 的迁移创建
 	Activity *activity.Tracker // 活跃播放跟踪（05 文档 3.4）
 	Thumbs   *thumb.Service    // 缩略图生成与缓存（03 文档 4.5）
+
+	vault vaultState // 加密片库解锁会话（04 文档），首次使用时创建
 }
 
 // port 返回实际监听端口。

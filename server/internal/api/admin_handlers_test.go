@@ -326,8 +326,6 @@ func TestAdminPage(t *testing.T) {
 func TestAdminP2Routes(t *testing.T) {
 	e := newAuthEnv(t)
 	for _, c := range []struct{ method, url string }{
-		{"PUT", "/api/admin/shares/s1/vault"},
-		{"DELETE", "/api/admin/shares/s1/vault"},
 		{"GET", "/api/admin/shares/s1/organize"},
 		{"PUT", "/api/admin/shares/s1/organize"},
 		{"POST", "/api/admin/shares/s1/organize/scan"},
