@@ -10,7 +10,7 @@ App 永远不接触电脑真实路径（如 `D:\Movies`），真实路径只存�
 
 | 概念 | 说明 | 示例 |
 | ---- | ---- | ---- |
-| `shareId` | 共享创建时生成的短 ID（8 位 base32 随机），**不随显示名改名而变**；进度、缩略图缓存都以它为键 | `k3f9q2ma` |
+| `shareId` | 共享创建时生成的短 ID（8 位 base32 随机），**不随显示名改名而变**；进度以它为键 | `k3f9q2ma` |
 | 显示名 | 手机上看到的名字，可随时改 | `动漫` |
 | `path` | 共享内相对路径，`/` 分隔，不以 `/` 开头；空串表示共享根 | `进击的巨人/S01/E12.mkv` |
 | 真实路径 | 仅服务端：共享根（启动时 `filepath.EvalSymlinks` 规范化）+ `path` | `D:\Anime\进击的巨人\S01\E12.mkv` |
@@ -156,11 +156,11 @@ flowchart LR
 
 | 来源 | 生成方式 | `hasThumb` |
 | ---- | ---- | ---- |
-| 图片 jpg/png/gif/webp | Go 图像库（`image/*` + `golang.org/x/image/webp`）解码缩放 | true |
-| 视频 | ffmpeg 截取约 10% 处一帧（PATH 或配置中找到 ffmpeg 时） | 有 ffmpeg 才 true |
+| 图片 jpg/png/gif/webp | Go 图像库（`image/*` + `golang.org/x/image/webp`）解码缩放；暂未按 EXIF 方向旋转（见 07 §3） | true |
+| 视频 | ffmpeg 截取第 10 秒一帧，片长不足取第 0 秒（PATH 或配置中找到 ffmpeg 时） | 有 ffmpeg 才 true |
 | 其他（含 HEIC） | — | false，App 用占位封面 |
 
-- 缓存：`%LOCALAPPDATA%\LanFileBrowser\cache\thumbs\<sha256(shareId+path+mtime+size+w)>.jpg`；文件变更后键自然失效，缓存总量超上限（默认 1 GB）按访问时间淘汰。
+- 缓存：`%LOCALAPPDATA%\LanFileBrowser\cache\thumbs\<sha256(真实路径+mtime+size+w)>.jpg`；文件变更后键自然失效。缓存总量超上限（默认 1 GB）按访问时间淘汰暂未实现（见 07 §3）。
 - 生成并发上限 2（避免 ffmpeg 抢占 CPU）；`hasThumb` 表示「可生成」，不表示已缓存。
 - 错误：`NOT_FOUND`（含不支持的类型）、`SHARE_OFFLINE`。
 
@@ -201,7 +201,7 @@ flowchart LR
 | 接口 | 说明 |
 | ---- | ---- |
 | `POST /api/progress` | Body `{share, path, position, duration}`（秒）。App 播放中每 10 秒、暂停、退出时上报。返回 `204` |
-| `GET /api/continue` | 继续观看列表（最多 20 条）：按「共享+目录」聚合，取所有设备中最近一条；字段 `share, path, name, position, duration, updatedAt, deviceName`；若已看完则附 `next`（4.6 结果），无下一集则不出现 |
+| `GET /api/continue` | 继续观看列表（最多 20 条）：按「共享+目录」聚合，取所有设备中最近一条；字段 `share, path, name, position, duration, watched, updatedAt, deviceName`（`deviceName` 为上报该记录的设备名）；`watched` 为真时附 `next`（4.6 返回的 `item`，含 `path`），无下一集则该条目不出现 |
 
 - 看完判定：`position ≥ 90% × duration`，或 `duration ≥ 10 分钟` 且 `duration − position < 120 秒`（不足 10 分钟的短视频只按 90% 判定）。
 - 仅返回本设备当前可见共享内的记录（不泄露不可见共享）。
