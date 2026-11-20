@@ -9,6 +9,7 @@ import (
 	"lfb/server/internal/activity"
 	"lfb/server/internal/config"
 	"lfb/server/internal/thumb"
+	"lfb/server/internal/update"
 	"lfb/server/internal/web"
 )
 
@@ -22,6 +23,7 @@ type Server struct {
 	Store    *sql.DB           // data.db，表由 internal/store 的迁移创建
 	Activity *activity.Tracker // 活跃播放跟踪（05 文档 3.4）
 	Thumbs   *thumb.Service    // 缩略图生成与缓存（03 文档 4.5）
+	Updates  *update.Checker   // 检查更新与 APK 缓存（02 文档第 5 节）
 }
 
 // port 返回实际监听端口。
@@ -49,6 +51,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /app.js", page)
 	mux.HandleFunc("GET /vault.js", page)
 	mux.HandleFunc("GET /organize.js", page)
+	mux.HandleFunc("GET /update.js", page)
 	mux.HandleFunc("GET /style.css", page)
 	mux.HandleFunc("GET /api/admin/status", localOnly(s.handleAdminStatus))
 	mux.HandleFunc("GET /api/admin/pairing", localOnly(s.handleAdminPairing))
@@ -91,6 +94,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/admin/organize/defaults", localOnly(s.handleOrganizeDefaultsGet))
 	mux.HandleFunc("PUT /api/admin/organize/defaults", s.adminWrite(s.handleOrganizeDefaultsPut))
 	mux.HandleFunc("POST /api/admin/organize/check-path", s.adminWrite(s.handleOrganizeCheckPath))
+
+	// 更新（02 文档第 5 节）
+	mux.HandleFunc("GET /api/admin/update", localOnly(s.handleAdminUpdate))
+	mux.HandleFunc("POST /api/admin/update/check", s.adminWrite(s.handleAdminUpdateCheck))
+	mux.HandleFunc("GET /api/app/latest", s.requireDevice(s.handleAppLatest))
+	mux.HandleFunc("GET /api/app/apk/{abi}", s.requireDevice(s.handleAppAPK))
 
 	return mux
 }

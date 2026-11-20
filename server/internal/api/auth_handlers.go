@@ -26,7 +26,7 @@ func writeAuthJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// GET /api/ping —— 免鉴权，返回 {id, name, version, needPair}
+// GET /api/ping —— 免鉴权，返回 {id, name, version, minAppVersion, needPair}
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.authService(w, r)
 	if !ok {
@@ -35,7 +35,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	_, valid := svc.DeviceFromRequest(r)
 	cfg := s.Config.Get()
 	writeAuthJSON(w, http.StatusOK, map[string]any{
-		"id": cfg.ServerID, "name": cfg.Name, "version": s.Version, "needPair": !valid,
+		"id": cfg.ServerID, "name": cfg.Name, "version": s.Version, "minAppVersion": MinAppVersion, "needPair": !valid,
 	})
 }
 
