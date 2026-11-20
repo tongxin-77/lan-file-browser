@@ -75,6 +75,27 @@ func Parse(name string) (info Info, ok bool) {
 	return info, true
 }
 
+// ParseSeason 解析只标季、不标集的文件名（如季级字幕 `Show.S01.chs.srt`、`剧名 第二季.ass`），
+// 剧名取季号记号之前。能解析出集号、没有季号或没有剧名时 ok 为 false。
+func ParseSeason(name string) (info Info, ok bool) {
+	if _, hasEp := Parse(name); hasEp {
+		return Info{}, false
+	}
+	stem := name
+	if media.Kind(name) != media.KindOther {
+		stem = strings.TrimSuffix(name, path.Ext(name))
+	}
+	for _, re := range []*regexp.Regexp{reSeasonCN, reSeasonEN} {
+		if m := re.FindStringSubmatchIndex(stem); m != nil {
+			n, ok := cnNum(stem[m[2]:m[3]])
+			if show := normalizeShow(stem[:m[0]]); ok && show != "" {
+				return Info{Show: show, Season: n}, true
+			}
+		}
+	}
+	return Info{}, false
+}
+
 // ParseWithDir 同 Parse；文件名中没有剧名时取所在目录名（dir 为相对路径，/ 或 \ 分隔）。
 // 目录名是季文件夹（如 `第二季`、`Season 2`）时取其季号，剧名再往上取一级。
 func ParseWithDir(dir, name string) (Info, bool) {

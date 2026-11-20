@@ -79,7 +79,8 @@ type subtitleItem struct {
 var reLangTag = regexp.MustCompile(`^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,4})?$`)
 
 // GET /api/subtitles?share=&path=
-// exact：同名或同名+语言后缀；episode：同目录字幕集号与视频相同（季号缺省时不比较）。
+// exact：同名或同名+语言后缀；episode：同目录字幕集号与视频相同（季号缺省时不比较）；
+// season：字幕只标季不标集，剧名（忽略大小写）与季号（视频未标季视为第 1 季）与视频相同。
 func (s *Server) handleSubtitles(w http.ResponseWriter, r *http.Request) {
 	dir, name, items, ok := s.siblings(w, r)
 	if !ok {
@@ -87,7 +88,7 @@ func (s *Server) handleSubtitles(w http.ResponseWriter, r *http.Request) {
 	}
 	stem := strings.TrimSuffix(name, path.Ext(name))
 	cur, curOK := episode.ParseWithDir(dir, name)
-	exact, byEpisode := []subtitleItem{}, []subtitleItem{}
+	exact, byEpisode, bySeason := []subtitleItem{}, []subtitleItem{}, []subtitleItem{}
 	for _, it := range items {
 		if it.Kind != media.KindSubtitle {
 			continue
@@ -101,20 +102,24 @@ func (s *Server) handleSubtitles(w http.ResponseWriter, r *http.Request) {
 		case len(sstem) > len(stem)+1 && sstem[len(stem)] == '.' && strings.EqualFold(sstem[:len(stem)], stem):
 			sub.Match, sub.Lang = "exact", sstem[len(stem)+1:]
 		default:
-			e, ok := episode.ParseWithDir(dir, it.Name)
-			if !curOK || !ok || e.Episode != cur.Episode || e.Season != 0 && cur.Season != 0 && e.Season != cur.Season {
-				continue
-			}
-			sub.Match = "episode"
 			if i := strings.LastIndexByte(sstem, '.'); i >= 0 && reLangTag.MatchString(sstem[i+1:]) {
 				sub.Lang = sstem[i+1:]
 			}
-			byEpisode = append(byEpisode, sub)
+			if e, ok := episode.ParseWithDir(dir, it.Name); ok {
+				if curOK && e.Episode == cur.Episode && (e.Season == 0 || cur.Season == 0 || e.Season == cur.Season) {
+					sub.Match = "episode"
+					byEpisode = append(byEpisode, sub)
+				}
+			} else if e, ok := episode.ParseSeason(it.Name); ok && curOK && cur.Show != "" &&
+				strings.EqualFold(e.Show, cur.Show) && e.Season == max(cur.Season, 1) {
+				sub.Match = "season"
+				bySeason = append(bySeason, sub)
+			}
 			continue
 		}
 		exact = append(exact, sub)
 	}
-	writeJSON(w, map[string]any{"items": append(exact, byEpisode...)})
+	writeJSON(w, map[string]any{"items": append(append(exact, byEpisode...), bySeason...)})
 }
 
 // siblings 校验当前文件（共享可见、路径合法、存在且对本设备可见、不是目录），返回其所在目录

@@ -185,13 +185,14 @@ flowchart LR
 
 ### 4.7 GET /api/subtitles
 
-参数：`share`、`path`（视频）。返回 `items[]`：`{name, path, format, lang, match}`，App 通过 `/api/file` 拉取。
+参数：`share`、`path`（视频）。返回 `items[]`：`{name, path, format, lang, match}`，App 通过 `/api/file` 拉取；按 `exact`、`episode`、`season` 顺序排列。
 
 | `match` | 规则 | 示例（视频 `E12.mkv`） |
 | ---- | ---- | ---- |
 | `exact` | 同名，扩展名 `.srt .ass .ssa .vtt` | `E12.ass` |
 | `exact` | 同名 + 语言后缀，`lang` 取后缀 | `E12.chs.srt`、`E12.zh-CN.ass` |
 | `episode` | 同目录字幕中集号与视频相同（字幕组文件名与视频不一致时） | `[字幕组] Show [12].chs.ass` |
+| `season` | 字幕只标季不标集，剧名（规范化后）与季号和视频相同（视频未标季视为第 1 季） | 视频 `Show.S01E12.mkv` 时的 `Show.S01.chs.srt` |
 
 ### 4.8 观看进度：POST /api/progress、GET /api/continue
 
