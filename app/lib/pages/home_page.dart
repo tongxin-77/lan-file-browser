@@ -3,11 +3,16 @@ import 'package:material_ui/material_ui.dart';
 import '../api/api_exception.dart';
 import '../api/lfb_client.dart';
 import '../app.dart';
+import '../models/continue_item.dart';
 import '../models/server.dart';
 import '../models/share.dart';
+import '../services/playback.dart';
 import '../theme.dart';
+import '../widgets/continue_tile.dart';
 import '../widgets/lamp_glow.dart';
+import '../widgets/thumb.dart';
 import 'browser_page.dart';
+import 'player_page.dart';
 
 /// 首页：电脑名、连接状态、共享列表（03 §4.1）。
 class HomePage extends StatefulWidget {
@@ -24,6 +29,7 @@ class _HomePageState extends State<HomePage> {
   List<Share>? _shares;
   String? _error;
   bool _connected = true;
+  List<ContinueItem> _continue = const [];
 
   @override
   void initState() {
@@ -31,7 +37,36 @@ class _HomePageState extends State<HomePage> {
     _load();
   }
 
+  /// 继续观看（03 §4.8）；失败不影响首页，保留旧列表。
+  Future<void> _loadContinue() async {
+    try {
+      final items = await widget.client.continueWatching();
+      if (mounted) setState(() => _continue = items);
+    } on LfbException {
+      // 忽略
+    }
+  }
+
+  /// 看完且有下一集的直接播下一集，否则从上次位置继续。
+  void _play(ContinueItem c) {
+    final t = c.target;
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => PlayerPage(
+              client: widget.client,
+              shareId: c.share,
+              path: t.path,
+              title: t.name,
+              startAt: resumePosition(t.progress),
+            ),
+          ),
+        )
+        .then((_) => _loadContinue());
+  }
+
   Future<void> _load() async {
+    _loadContinue();
     try {
       final shares = await widget.client.shares();
       if (!mounted) return;
@@ -108,6 +143,34 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                     const SizedBox(height: 24),
+                    if (_continue.isNotEmpty) ...[
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+                        child: Text(
+                          '接着看',
+                          style: TextStyle(color: NightColors.ash),
+                        ),
+                      ),
+                      for (final c in _continue)
+                        ContinueTile(
+                          item: c,
+                          onTap: () => _play(c),
+                          art: ServerThumb(
+                            client: widget.client,
+                            share: c.share,
+                            path: c.target.path,
+                            mtime: c.playsNext
+                                ? c.next!.item.mtime
+                                : DateTime.fromMillisecondsSinceEpoch(0),
+                            width: 112,
+                            placeholder: const ThumbPlaceholder(
+                              icon: Icons.movie_outlined,
+                              color: NightColors.wick,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+                    ],
                     if (_error != null)
                       Padding(
                         padding: const EdgeInsets.all(16),
