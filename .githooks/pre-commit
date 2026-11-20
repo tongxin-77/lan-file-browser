@@ -1,0 +1,35 @@
+#!/bin/sh
+# 提交前格式检查：Go 用 gofmt，Dart 用 dart format（启用：git config core.hooksPath .githooks）
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+fail=0
+
+if git diff --cached --name-only --diff-filter=ACMR | grep -q '\.go$'; then
+	if ! command -v gofmt >/dev/null 2>&1; then
+		echo "pre-commit: 找不到 gofmt，无法检查 Go 格式" >&2
+		exit 1
+	fi
+	unformatted=$(cd server && gofmt -l .)
+	if [ -n "$unformatted" ]; then
+		echo "pre-commit: 以下 Go 文件未格式化（在 server/ 下运行 gofmt -w .）：" >&2
+		echo "$unformatted" | sed 's/^/  server\//' >&2
+		fail=1
+	fi
+fi
+
+if [ -f app/pubspec.yaml ]; then
+	dart_files=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.dart$')
+	if [ -n "$dart_files" ]; then
+		if command -v dart >/dev/null 2>&1; then
+			# shellcheck disable=SC2086
+			if ! dart format --output=none --set-exit-if-changed $dart_files; then
+				echo "pre-commit: 以上 Dart 文件未格式化（运行 dart format <文件>）" >&2
+				fail=1
+			fi
+		else
+			echo "pre-commit: dart 不在 PATH 中，跳过 Dart 格式检查" >&2
+		fi
+	fi
+fi
+
+exit $fail
