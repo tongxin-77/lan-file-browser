@@ -2,11 +2,13 @@ package api
 
 import (
 	"cmp"
+	"io/fs"
 	"net/http"
 	"path"
 	"regexp"
 	"strings"
 
+	"lfb/server/internal/config"
 	"lfb/server/internal/episode"
 	"lfb/server/internal/listing"
 	"lfb/server/internal/media"
@@ -144,22 +146,32 @@ func (s *Server) siblings(w http.ResponseWriter, r *http.Request) (dir, name str
 	}
 	dir, name = path.Split(rel)
 	dir = strings.TrimSuffix(dir, "/")
-	d, _, err := openInShare(sh, dir)
+	items, err = siblingFiles(sh, dir, name)
 	if err != nil {
 		writeFSError(w, err)
 		return
 	}
+	return dir, name, items, true
+}
+
+// siblingFiles 返回共享内目录 dir 中对本设备可见的文件条目（不含 name，按名称自然排序）。
+// 目录无法读取时返回 fs.ErrNotExist（按 404 处理）。
+func siblingFiles(sh *config.Share, dir, name string) ([]listItem, error) {
+	d, _, err := openInShare(sh, dir)
+	if err != nil {
+		return nil, err
+	}
 	defer d.Close()
 	entries, err := d.ReadDir(-1)
 	if err != nil {
-		writeError(w, CodeNotFound, "目录无法读取")
-		return
+		return nil, fs.ErrNotExist
 	}
+	var items []listItem
 	for _, e := range entries {
 		if it, ok := entryItem(sh, dir, e); ok && it.Kind != media.KindDir && !strings.EqualFold(it.Name, name) {
 			items = append(items, it)
 		}
 	}
 	sortItems(items, "name", false)
-	return dir, name, items, true
+	return items, nil
 }
