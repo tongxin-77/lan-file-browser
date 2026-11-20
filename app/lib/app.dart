@@ -6,10 +6,13 @@ import 'pages/connect_page.dart';
 import 'pages/home_page.dart';
 import 'pages/startup_page.dart';
 import 'services/server_store.dart';
+import 'services/update_checker.dart';
 import 'theme.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 final serverStore = ServerStore();
+
+final updateChecker = UpdateChecker(() => navigatorKey.currentContext);
 
 class LfbApp extends StatelessWidget {
   const LfbApp({super.key});
@@ -49,13 +52,14 @@ Future<void> _signOut(SavedServer server) async {
 }
 
 void openHome(SavedServer server, String token) {
+  final client = clientFor(server, token);
   navigatorKey.currentState?.pushAndRemoveUntil(
     MaterialPageRoute<void>(
-      builder: (_) =>
-          HomePage(server: server, client: clientFor(server, token)),
+      builder: (_) => HomePage(server: server, client: client),
     ),
     (_) => false,
   );
+  updateChecker.start(client); // 连接成功后检查更新与电脑端版本（02 §5）
 }
 
 void showConnectPage({String? message, bool canRetry = false}) {
