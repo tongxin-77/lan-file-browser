@@ -186,7 +186,7 @@ stateDiagram-v2
 | 步骤 | 说明 |
 | ---- | ---- |
 | 触发 | 剩余时长 ≤ 2 分钟时调用 `/api/next`、`/api/subtitles`（03 §4.6/4.7） |
-| 预取 | 对下一集 `/api/file` 发 `Range: bytes=0-8388607`（约 8 MB）；字幕整文件下载到本地临时目录 |
+| 预取 | 对下一集 `/api/file` 发 `Range: bytes=0-8388607`（约 8 MB）；字幕整文件下载到本地临时目录（App 现状：未预取字幕，切到下一集时再请求 `/api/subtitles`，字幕以 `/api/file?t=` 直链交给 mpv） |
 | 实际收益 | App 下载的这 8 MB **无法直接喂给 mpv**（不引入本地代理）；收益在于：唤醒电脑硬盘、进入电脑系统文件缓存、提前验证可达。下一集起播时读取命中服务端缓存 |
 | 替代（待评估） | mpv `prefetch-playlist=yes` + media_kit `Playlist`，由 mpv 自己预取并复用；官方标注为实验性，与自定义「下一集」逻辑耦合，暂不采用 |
 

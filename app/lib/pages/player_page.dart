@@ -8,9 +8,13 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../api/api_exception.dart';
 import '../api/lfb_client.dart';
+import '../models/file_item.dart';
+import '../models/subtitle.dart';
 import '../services/platform.dart';
+import '../services/playback.dart';
 import '../theme.dart';
 import '../widgets/file_tile.dart';
+import '../widgets/up_next_card.dart';
 
 /// libmpv 选项（docs/05-playback.md 4.2），须在 open 之前设置。
 /// demuxer-max-bytes 由 PlayerConfiguration.bufferSize 设置；hwdec 保持 media_kit 默认 auto-safe。
@@ -26,7 +30,8 @@ const _mpvOptions = {
 /// 断线续播退避（05 §4.3）：1/2/4/8 秒，共 4 次（约 15 秒）后提示失败。
 const _retryDelays = [1, 2, 4, 8];
 
-/// 视频播放：横屏全屏、硬解、屏幕常亮 + WifiLock、断线自动续播。
+/// 视频播放：横屏全屏、硬解、屏幕常亮 + WifiLock、断线自动续播；
+/// 观看进度上报、片尾自动下一集、选集、外挂字幕（P2）。
 class PlayerPage extends StatefulWidget {
   const PlayerPage({
     super.key,
@@ -34,12 +39,16 @@ class PlayerPage extends StatefulWidget {
     required this.shareId,
     required this.path,
     required this.title,
+    this.startAt = Duration.zero,
   });
 
   final LfbClient client;
   final String shareId;
   final String path;
   final String title;
+
+  /// 起播位置（续播，见 [resumePosition]）。
+  final Duration startAt;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
@@ -75,6 +84,26 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Timer? _hideTimer;
   double? _dragSeconds;
 
+  /// 当前播放的文件（切集后改变）。
+  late String _path = widget.path;
+  late String _title = widget.title;
+
+  /// 当前文件已加载（时长已知），外挂字幕须在此之后添加。
+  bool _loaded = false;
+
+  late final _reporter = ProgressReporter(_sendProgress);
+  final _upNext = UpNextCountdown();
+  Timer? _upNextTimer;
+  Future<PathItem?>? _nextLookup;
+  bool _prefetched = false;
+
+  List<SubtitleInfo> _subtitles = const [];
+  SubtitleTrack? _subtitleTrack; // 用户/自动选定的字幕；null = 播放器默认
+  String _subtitleName = '默认';
+
+  bool _drawer = false;
+  List<PathItem>? _episodes;
+
   @override
   void initState() {
     super.initState();
@@ -90,10 +119,20 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final s = _player.stream;
     _subs.addAll([
       s.position.listen(_onPosition),
-      s.duration.listen((d) => setState(() => _duration = d)),
+      s.duration.listen((d) {
+        setState(() => _duration = d);
+        if (d > Duration.zero && !_loaded) {
+          _loaded = true;
+          _applySubtitle();
+        }
+      }),
       s.playing.listen((p) {
         setState(() => _playing = p);
-        if (p) _scheduleHide();
+        if (p) {
+          _scheduleHide();
+        } else {
+          _reporter.flush(_resumeAt, _duration); // 暂停 / 播完立即上报
+        }
       }),
       s.buffering.listen((b) {
         _bufferingSince = b ? DateTime.now() : null;
@@ -107,6 +146,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             _duration > Duration.zero &&
             _resumeAt < _duration - const Duration(seconds: 5)) {
           _onDisconnect();
+        } else if (done) {
+          _showUpNext();
         }
       }),
     ]);
@@ -131,15 +172,20 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         await native.setProperty(e.key, e.value);
       }
     }
-    await _open(Duration.zero);
+    _resumeAt = widget.startAt;
+    await _open(widget.startAt);
+    _loadSubtitles();
   }
 
-  Future<void> _open(Duration start) => _player.open(
-    Media(
-      widget.client.fileUrl(widget.shareId, widget.path).toString(),
-      start: start > Duration.zero ? start : null,
-    ),
-  );
+  Future<void> _open(Duration start) {
+    _loaded = false;
+    return _player.open(
+      Media(
+        widget.client.fileUrl(widget.shareId, _path).toString(),
+        start: start > Duration.zero ? start : null,
+      ),
+    );
+  }
 
   void _onPosition(Duration p) {
     if (!mounted) return;
@@ -151,6 +197,223 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       setState(() => _reconnecting = false);
     }
     _resumeAt = p;
+    if (!_loaded && _duration > Duration.zero) {
+      // 续播重开同一文件时时长可能不再变化，以位置前进为准补加字幕
+      _loaded = true;
+      _applySubtitle();
+    }
+    if (_reconnecting) return;
+    if (_playing) _reporter.onPosition(p, _duration);
+    if (!_prefetched && shouldPrefetchNext(p, _duration)) {
+      _prefetched = true;
+      _lookupNext().then((n) {
+        if (n != null) widget.client.prefetch(widget.shareId, n.path);
+      });
+    }
+    if (shouldShowUpNext(p, _duration)) _showUpNext();
+  }
+
+  // ---- 观看进度（03 §4.8）----
+
+  void _sendProgress(Duration position, Duration duration) {
+    widget.client
+        .reportProgress(
+          widget.shareId,
+          _path,
+          position: position,
+          duration: duration,
+        )
+        .catchError((Object _) {}); // 上报失败不打扰播放
+  }
+
+  // ---- 下一集 ----
+
+  /// 当前这一集的 /api/next，只请求一次；失败视为无下一集。
+  Future<PathItem?> _lookupNext() => _nextLookup ??= widget.client
+      .next(widget.shareId, _path)
+      .then<PathItem?>((n) => n, onError: (Object _) => null);
+
+  void _showUpNext() {
+    if (_upNext.phase != UpNextPhase.idle) return;
+    final path = _path;
+    _lookupNext().then((n) {
+      if (!mounted || n == null || path != _path) return;
+      if (!_upNext.start(n)) return;
+      setState(() {});
+      _upNextTimer?.cancel();
+      _upNextTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        final fire = _upNext.tick();
+        setState(() {});
+        if (fire) _switchTo(n);
+        if (_upNext.phase != UpNextPhase.counting) _upNextTimer?.cancel();
+      });
+    });
+  }
+
+  void _cancelUpNext() {
+    _upNextTimer?.cancel();
+    setState(_upNext.cancel);
+  }
+
+  void _playUpNextNow() {
+    final n = _upNext.next;
+    if (n != null && _upNext.playNow()) _switchTo(n);
+  }
+
+  Future<void> _playNext() async {
+    final n = await _lookupNext();
+    if (!mounted) return;
+    if (n == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已经是最后一集')));
+      return;
+    }
+    _switchTo(n);
+  }
+
+  /// 切到另一集：先上报当前进度，再从该集上次位置打开。
+  Future<void> _switchTo(PathItem item) async {
+    _reporter.flush(_resumeAt, _duration);
+    _reporter.reset();
+    _upNextTimer?.cancel();
+    _upNext.reset();
+    _nextLookup = null;
+    _prefetched = false;
+    final start = item.path == _path
+        ? Duration.zero
+        : resumePosition(item.item.progress);
+    setState(() {
+      _path = item.path;
+      _title = item.item.name;
+      _subtitles = const [];
+      _subtitleTrack = null;
+      _subtitleName = '默认';
+      _drawer = false;
+      _episodes = null; // 进度已变，下次打开抽屉重新加载
+      _position = start;
+      _duration = Duration.zero;
+      _failure = null;
+      _reconnecting = false;
+    });
+    _retry = 0;
+    _resumeAt = start;
+    await _open(start);
+    _loadSubtitles();
+  }
+
+  // ---- 选集 ----
+
+  Future<void> _toggleDrawer() async {
+    setState(() => _drawer = !_drawer);
+    if (_drawer) _hideTimer?.cancel();
+    final dir = parentPath(_path);
+    if (!_drawer || _episodes != null) return;
+    try {
+      final page = await widget.client.list(widget.shareId, dir, limit: 1000);
+      if (!mounted || page == null) return;
+      setState(() {
+        _episodes = [
+          for (final it in page.items)
+            if (it.kind == FileKind.video) PathItem(it, joinPath(dir, it.name)),
+        ];
+      });
+    } on LfbException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    }
+  }
+
+  // ---- 字幕（03 §4.7）----
+
+  Future<void> _loadSubtitles() async {
+    final path = _path;
+    try {
+      final subs = await widget.client.subtitles(widget.shareId, path);
+      if (!mounted || path != _path) return;
+      setState(() => _subtitles = subs);
+      final best = pickSubtitle(subs);
+      if (best != null && _subtitleTrack == null) _chooseExternal(best);
+    } on LfbException {
+      // 没有外挂字幕也能播
+    }
+  }
+
+  /// 外挂字幕经 /api/file?t= 直链给 mpv（t 在白名单内）。
+  void _chooseExternal(SubtitleInfo s) {
+    _subtitleTrack = SubtitleTrack.uri(
+      widget.client.fileUrl(widget.shareId, s.path).toString(),
+      title: subtitleLabel(s),
+      language: s.lang.isEmpty ? null : s.lang,
+    );
+    setState(() => _subtitleName = subtitleLabel(s));
+    _applySubtitle();
+  }
+
+  void _chooseTrack(SubtitleTrack t, String name) {
+    _subtitleTrack = t;
+    setState(() => _subtitleName = name);
+    _applySubtitle();
+  }
+
+  void _applySubtitle() {
+    final t = _subtitleTrack;
+    if (_loaded && t != null) _player.setSubtitleTrack(t);
+  }
+
+  Future<void> _showSubtitleMenu() async {
+    _hideTimer?.cancel();
+    final embedded = _player.state.tracks.subtitle
+        .where((t) => t.id != 'auto' && t.id != 'no' && !t.uri && !t.data)
+        .toList();
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: NightColors.pillow,
+      showDragHandle: true,
+      builder: (ctx) {
+        Widget option(String name, VoidCallback onTap) => ListTile(
+          title: Text(name),
+          trailing: name == _subtitleName
+              ? const Icon(Icons.check, color: NightColors.wick)
+              : null,
+          onTap: () {
+            Navigator.of(ctx).pop();
+            onTap();
+          },
+        );
+        return ListView(
+          shrinkWrap: true,
+          children: [
+            option('关闭', () => _chooseTrack(SubtitleTrack.no(), '关闭')),
+            for (final s in _subtitles)
+              ListTile(
+                title: Text(subtitleLabel(s)),
+                subtitle: Text(
+                  s.name,
+                  style: const TextStyle(color: NightColors.ash),
+                ),
+                trailing: subtitleLabel(s) == _subtitleName
+                    ? const Icon(Icons.check, color: NightColors.wick)
+                    : null,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _chooseExternal(s);
+                },
+              ),
+            for (final (i, t) in embedded.indexed)
+              option(
+                '内嵌 · ${t.title ?? t.language ?? '字幕 ${i + 1}'}',
+                () => _chooseTrack(
+                  t,
+                  '内嵌 · ${t.title ?? t.language ?? '字幕 ${i + 1}'}',
+                ),
+              ),
+          ],
+        );
+      },
+    );
+    _scheduleHide();
   }
 
   /// 进入「重新连接中」：按退避间隔安排一次重试。
@@ -210,6 +473,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _retryTimer?.cancel();
     _stallTimer?.cancel();
     _hideTimer?.cancel();
+    _upNextTimer?.cancel();
+    _reporter.flush(_resumeAt, _duration); // 退出时上报
     WakelockPlus.disable();
     PlatformService.releaseWifiLock();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -221,7 +486,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void _scheduleHide() {
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && _playing && _dragSeconds == null) {
+      if (mounted && _playing && _dragSeconds == null && !_drawer) {
         setState(() => _controls = false);
       }
     });
@@ -257,7 +522,103 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             Center(child: _pill(const Text('重新连接中…'))),
           if (_failure != null) Center(child: _failurePanel()),
           if (_controls) ..._controlsOverlay(),
+          if (_upNext.phase == UpNextPhase.counting) ..._upNextOverlay(),
+          if (_drawer) _episodeDrawer(),
         ],
+      ),
+    );
+  }
+
+  /// 片尾卡片（设计稿 4b）：画面变暗，卡片在右下角拇指处。
+  List<Widget> _upNextOverlay() => [
+    const IgnorePointer(child: ColoredBox(color: Color(0x66000000))),
+    Positioned(
+      right: 24,
+      bottom: 24,
+      child: SafeArea(
+        child: UpNextCard(
+          fileName: _upNext.next!.item.name,
+          remaining: _upNext.remaining,
+          total: _upNext.seconds,
+          onCancel: _cancelUpNext,
+          onPlayNow: _playUpNextNow,
+        ),
+      ),
+    ),
+  ];
+
+  /// 选集抽屉（设计稿 4a）：同目录视频，当前集高亮，看完的集下方一道苔绿短线。
+  Widget _episodeDrawer() {
+    final eps = _episodes;
+    return Positioned(
+      top: 0,
+      bottom: 0,
+      right: 0,
+      width: 320,
+      child: Material(
+        color: NightColors.quilt.withValues(alpha: 0.94),
+        child: SafeArea(
+          left: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 8, 4),
+                child: Row(
+                  children: [
+                    Text('选集', style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(width: 8),
+                    if (eps != null)
+                      Text(
+                        '${eps.length} 集',
+                        style: const TextStyle(color: NightColors.ash),
+                      ),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '关闭',
+                      icon: const Icon(Icons.close),
+                      onPressed: _toggleDrawer,
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: eps == null
+                    ? const Center(child: CircularProgressIndicator())
+                    : ListView.builder(
+                        itemCount: eps.length,
+                        itemBuilder: (context, i) {
+                          final e = eps[i];
+                          final current = e.path == _path;
+                          final watched = e.item.progress?.watched ?? false;
+                          return ListTile(
+                            selected: current,
+                            selectedColor: NightColors.wick,
+                            title: Text(
+                              episodeLabel(e.item.name),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: watched
+                                ? Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Container(
+                                      width: 24,
+                                      height: 2,
+                                      color: NightColors.moss,
+                                    ),
+                                  )
+                                : e.item.progress != null
+                                ? WatchBar(progress: e.item.progress!)
+                                : null,
+                            onTap: current ? null : () => _switchTo(e),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -332,12 +693,21 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 ),
                 Expanded(
                   child: Text(
-                    widget.title,
+                    _title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: NightColors.moon),
                   ),
                 ),
+                TextButton(
+                  onPressed: _showSubtitleMenu,
+                  style: TextButton.styleFrom(
+                    foregroundColor: NightColors.moon,
+                    minimumSize: const Size(48, 48),
+                  ),
+                  child: Text('字幕 · $_subtitleName'),
+                ),
+                const SizedBox(width: 8),
               ],
             ),
           ),
@@ -394,6 +764,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     ),
                   ),
                   Text(formatDuration(_duration), style: numStyle),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _toggleDrawer,
+                    style: TextButton.styleFrom(
+                      foregroundColor: NightColors.moon,
+                      minimumSize: const Size(48, 48),
+                    ),
+                    icon: const Icon(Icons.grid_view),
+                    label: const Text('选集'),
+                  ),
+                  TextButton.icon(
+                    onPressed: _playNext,
+                    style: TextButton.styleFrom(
+                      foregroundColor: NightColors.moon,
+                      minimumSize: const Size(48, 48),
+                    ),
+                    icon: const Icon(Icons.skip_next),
+                    label: const Text('下一集'),
+                  ),
                 ],
               ),
             ),
