@@ -19,6 +19,8 @@ class FileItem {
     required this.size,
     required this.mtime,
     this.hidden = false,
+    this.hasThumb = false,
+    this.progress,
   });
 
   factory FileItem.fromJson(Map<String, dynamic> j) => FileItem(
@@ -29,6 +31,10 @@ class FileItem {
       (j['mtime'] as num?)?.toInt() ?? 0,
     ),
     hidden: j['hidden'] as bool? ?? false,
+    hasThumb: j['hasThumb'] as bool? ?? false,
+    progress: j['progress'] is Map
+        ? WatchProgress.fromJson((j['progress'] as Map).cast<String, dynamic>())
+        : null,
   );
 
   final String name;
@@ -37,7 +43,47 @@ class FileItem {
   final DateTime mtime;
   final bool hidden;
 
+  /// 服务端可生成缩略图（03 §4.5），不表示已缓存。
+  final bool hasThumb;
+
+  /// 仅视频：本设备观看进度（03 §4.2），无则 null。
+  final WatchProgress? progress;
+
   bool get isDir => kind == FileKind.dir;
+}
+
+/// 观看进度（秒）：`/api/list` 条目的 `progress` 字段。
+class WatchProgress {
+  const WatchProgress({
+    required this.position,
+    required this.duration,
+    this.watched = false,
+  });
+
+  factory WatchProgress.fromJson(Map<String, dynamic> j) => WatchProgress(
+    position: (j['position'] as num?)?.toDouble() ?? 0,
+    duration: (j['duration'] as num?)?.toDouble() ?? 0,
+    watched: j['watched'] as bool? ?? false,
+  );
+
+  final double position;
+  final double duration;
+  final bool watched;
+
+  /// 0–1，用于进度条。
+  double get fraction =>
+      duration > 0 ? (position / duration).clamp(0.0, 1.0) : 0.0;
+}
+
+/// 带共享内路径的条目：`/api/next` 的 `item`、`/api/continue` 的 `next`。
+class PathItem {
+  const PathItem(this.item, this.path);
+
+  factory PathItem.fromJson(Map<String, dynamic> j) =>
+      PathItem(FileItem.fromJson(j), j['path'] as String);
+
+  final FileItem item;
+  final String path;
 }
 
 /// 一页列表结果；[etag] 用于下拉刷新时 `If-None-Match`。
