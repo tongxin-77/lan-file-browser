@@ -248,3 +248,46 @@ func TestOrganizeLocalOnly(t *testing.T) {
 		t.Errorf("缺 CSRF 头: %d", w.Code)
 	}
 }
+
+// 修改片库路径时立即校验源/库互不嵌套（含跨片库），冲突返回 400 且不修改配置。
+func TestUpdateShareOrganizeLayout(t *testing.T) {
+	e := newOrgEnv(t)
+	dl, dl2 := e2dir(t, e.base, "dl"), e2dir(t, e.base, "dl2")
+	if w := e.put("sh1", map[string]any{"enabled": true, "sources": []any{src(dl, "copy")}}); w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if w := e.put("sh2", map[string]any{"enabled": true, "sources": []any{src(dl2, "copy")}}); w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	e2dir(t, e.base, "sh3")
+	e.s.Config.Update(func(c *config.Config) error {
+		c.Shares = append(c.Shares, config.Share{ID: "sh3", Name: "普通", Path: filepath.Join(e.base, "sh3")})
+		return nil
+	})
+	cases := []struct {
+		name, share, path string
+		want              int
+		msg               string
+	}{
+		{"本片库移到自己的源内", "sh1", e2dir(t, e.base, "dl/lib"), 400, "源文件夹和片库文件夹不能相同"},
+		{"本片库改为源的上级", "sh1", e.base, 400, "源文件夹和片库文件夹不能相同"},
+		{"移到其他片库的源内", "sh2", e2dir(t, e.base, "dl/lib2"), 400, "另一个自动整理片库"},
+		{"普通共享不参与", "sh3", e2dir(t, e.base, "dl/plain"), 200, ""},
+		{"无冲突", "sh1", e2dir(t, e.base, "lib-new"), 200, ""},
+	}
+	for _, c := range cases {
+		before := e.s.Config.Get().Share(c.share).Path
+		w := e.do("PUT", "/api/admin/shares/"+c.share, map[string]any{"name": e.s.Config.Get().Share(c.share).Name, "path": c.path})
+		if w.Code != c.want || !strings.Contains(w.Body.String(), c.msg) {
+			t.Errorf("%s: %d %s, want %d %q", c.name, w.Code, w.Body, c.want, c.msg)
+		}
+		if c.want != 200 {
+			if got := e.s.Config.Get().Share(c.share).Path; got != before {
+				t.Errorf("%s: 校验失败不应修改路径: %s", c.name, got)
+			}
+			if !strings.Contains(w.Body.String(), `"BAD_PATH"`) || strings.Contains(w.Body.String(), strings.ReplaceAll(e.base, `\`, `\`)) {
+				t.Errorf("%s: 应为 BAD_PATH 且不含真实路径: %s", c.name, w.Body)
+			}
+		}
+	}
+}
