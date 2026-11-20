@@ -33,28 +33,35 @@ const (
 	streamIdle       = 30 * time.Second // 流式响应「无进展超时」（05 文档 3.3）
 )
 
-// GET /api/shares
+// shareItem 是 /api/shares 的条目（/api/vault/unlock 的 shares 同此格式）。
+type shareItem struct {
+	ID     string     `json:"id"`
+	Name   string     `json:"name"`
+	Perms  sharePerms `json:"perms"`
+	Status string     `json:"status"`
+}
+
+type sharePerms struct {
+	Download   bool `json:"download"`
+	Upload     bool `json:"upload"`
+	Modify     bool `json:"modify"`
+	ShowHidden bool `json:"showHidden"`
+}
+
+func toShareItem(sh *config.Share) shareItem {
+	p := sh.Perms
+	return shareItem{sh.ID, sh.Name, sharePerms{p.Download, p.Upload, p.Delete, p.Hidden}, shareStatus(sh.Path)}
+}
+
+// GET /api/shares —— 加密片库始终不返回（解锁后只经 /api/vault/unlock 下发，04 文档第 7 节）
 func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
-	type perms struct {
-		Download   bool `json:"download"`
-		Upload     bool `json:"upload"`
-		Modify     bool `json:"modify"`
-		ShowHidden bool `json:"showHidden"`
-	}
-	type share struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Perms  perms  `json:"perms"`
-		Status string `json:"status"`
-	}
 	dev := DeviceID(r.Context())
-	items := []share{}
+	items := []shareItem{}
 	for _, sh := range s.allShares() {
-		if !visible(&sh, dev) {
+		if !visible(&sh, dev) || isVault(&sh) {
 			continue
 		}
-		p := sh.Perms
-		items = append(items, share{sh.ID, sh.Name, perms{p.Download, p.Upload, p.Delete, p.Hidden}, shareStatus(sh.Path)})
+		items = append(items, toShareItem(&sh))
 	}
 	writeJSON(w, map[string]any{"items": items})
 }
@@ -351,11 +358,11 @@ func finalHidden(shareRoot string, final []string, fi fs.FileInfo) bool {
 	return false
 }
 
-// visibleShare 返回对当前设备可见的共享；不存在或不可见均返回 nil（统一 404，不泄露存在性）。
+// visibleShare 返回对当前设备可见的共享；不存在、不可见、无会话的加密片库均返回 nil（统一 404，不泄露存在性）。
 func (s *Server) visibleShare(r *http.Request) *config.Share {
 	id := r.URL.Query().Get("share")
 	for _, sh := range s.allShares() {
-		if sh.ID == id && visible(&sh, DeviceID(r.Context())) {
+		if sh.ID == id && s.accessible(r, &sh) {
 			return &sh
 		}
 	}
