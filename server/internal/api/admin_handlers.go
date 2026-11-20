@@ -21,6 +21,7 @@ import (
 	"lfb/server/internal/config"
 	"lfb/server/internal/fsx"
 	"lfb/server/internal/listing"
+	"lfb/server/internal/organize"
 )
 
 // 本机管理页接口（均经 localOnly；修改类另经 adminWrite）。
@@ -260,6 +261,10 @@ func (s *Server) handleAdminUpdateShare(w http.ResponseWriter, r *http.Request) 
 				return err
 			}
 			sh.Path = p
+			// 自动整理的源/库互不嵌套（06 文档第 9 节），改路径时立即校验，不等到扫描时才跳过
+			if err := layoutErr(organize.CheckLayout(c)); err != nil {
+				return err
+			}
 		}
 		if err := checkNameFree(c, in.Name, id); err != nil {
 			return err
