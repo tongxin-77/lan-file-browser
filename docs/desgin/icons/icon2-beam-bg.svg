@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+<defs><radialGradient id="i2bg" cx=".7" cy=".3" r=".8"><stop offset="0" stop-color="#6E4C5D"/><stop offset="1" stop-color="#4A3341"/></radialGradient><radialGradient id="i2rim" cx="54" cy="54" r="36" gradientUnits="userSpaceOnUse"><stop offset=".78" stop-color="#F2CFDD" stop-opacity="0"/><stop offset="1" stop-color="#F2CFDD" stop-opacity=".16"/></radialGradient></defs>
+<rect width="108" height="108" fill="url(#i2bg)"/>
+<rect width="108" height="108" fill="url(#i2rim)"/>
+</svg>
