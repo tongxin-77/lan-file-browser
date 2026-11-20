@@ -16,7 +16,7 @@ server/                     Go 服务端，module lfb/server
   internal/web/             内嵌本机管理页静态文件（static/：原生 HTML/CSS/JS）
   internal/discovery/       局域网自动发现（P3，尚为空）
   configs/ installer/       配置示例 / Inno Setup 脚本（均尚为空）
-app/                        Flutter 工程（尚在初始化，目前只有 lib/ 下空目录骨架）
+app/                        Flutter 工程 lfb_app（lib/ 下 api models pages widgets services；Android 原生代码在 android/app/src/main/kotlin）
 docs/                       设计文档 01–07
 docs/desgin/                设计稿、图标、DECISIONS.md（目录名就是 desgin，保持原拼写，勿改名）
 .github/workflows/          release.yml（尚未创建）
@@ -37,9 +37,10 @@ go run ./cmd/server -data devdata -port 8686   # 本地调试；devdata/ 已在 
 - 管理页仅本机访问：`http://127.0.0.1:8686/`
 - 符号链接测试需开发者模式或管理员终端；`-race` 需 cgo + gcc（见 07-notes §1）
 
-App（在 `app/` 下执行，**Flutter 工程尚未创建，以下命令待 `flutter create` 后可用**）：
+App（在 `app/` 下执行；Flutter 3.50+，Gradle 依赖优先走阿里云镜像）：
 
 ```sh
+dart format --output=none --set-exit-if-changed lib test
 flutter analyze
 flutter test
 flutter build apk --release --split-per-abi
@@ -75,6 +76,7 @@ flutter build apk --release --split-per-abi
 
 - Go 最低 1.25（`os.Root` 的 Rename/Readlink）；`golang.org/x/sys` 固定 v0.46.0（更高版本要求 Go 1.26，升级前先改 `go.mod` 的 go 版本）。
 - 服务端依赖 `golang.org/x/sys/windows`，只能在 Windows 编译；CI 用 Windows runner。
+- App：Flutter 3.50 起 Material 组件从 `package:material_ui/material_ui.dart` 导入（`flutter create` 默认）；`media_kit_libs_android_video` 构建时从 GitHub Releases 下载 libmpv jar。
 - 版本号以 git tag 为准，不设 VERSION 文件；服务端与 App 共用同一 tag `vX.Y.Z`（发布见 `/release` skill 与 docs/02）。
 
 ### 流程
