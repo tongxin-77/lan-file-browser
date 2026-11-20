@@ -136,8 +136,8 @@ func TestRoutes(t *testing.T) {
 
 		// P2 占位（暂返回 501）：设备接口先鉴权，管理接口先过 localOnly / CSRF
 		{"GET", "/api/next", "192.168.1.9:1", "", 401},
-		{"GET", "/api/next", "192.168.1.9:1", tok, 501},
-		{"GET", "/api/subtitles", "192.168.1.9:1", tok, 501},
+		{"GET", "/api/next", "192.168.1.9:1", tok, 404},
+		{"GET", "/api/subtitles", "192.168.1.9:1", tok, 404},
 		{"POST", "/api/progress", "192.168.1.9:1", tok, 501},
 		{"GET", "/api/continue", "192.168.1.9:1", tok, 501},
 		{"GET", "/api/thumb", "192.168.1.9:1", tok, 501},
