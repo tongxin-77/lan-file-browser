@@ -16,7 +16,7 @@ fi
 
 # 2. git 仓库与远端
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  miss "当前目录不是 git 仓库（07-notes §4：尚未使用 git），需先初始化并推送到 GitHub"
+  miss "当前目录不是 git 仓库"
 else
   git remote get-url origin >/dev/null 2>&1 || miss "未配置 origin 远端（GitHub 仓库）"
   branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -35,7 +35,7 @@ fi
 # 3. 发布所需文件（02-release §1、§3、§6）
 [ -f .github/workflows/release.yml ] || miss "缺少 .github/workflows/release.yml（02 §3：server / app / release 三个 job）"
 [ -f server/installer/lfb-server.iss ] || miss "缺少 server/installer/lfb-server.iss（02 §6：Inno Setup 脚本，接收 /DAppVersion）"
-[ -f app/pubspec.yaml ] || miss "缺少 app/pubspec.yaml（Flutter 工程尚未 flutter create）"
+[ -f app/pubspec.yaml ] || miss "缺少 app/pubspec.yaml"
 gradle=$(ls app/android/app/build.gradle app/android/app/build.gradle.kts 2>/dev/null | head -1)
 if [ -z "$gradle" ]; then
   miss "缺少 app/android/app/build.gradle(.kts)（Android 工程未生成）"

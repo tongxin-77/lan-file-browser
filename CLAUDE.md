@@ -6,7 +6,7 @@
 
 ```
 server/                     Go 服务端，module lfb/server
-  cmd/server/               入口 main.go（flag：-data 数据目录、-port 端口；main.version 由 ldflags 注入，默认 dev）
+  cmd/server/               入口 main.go（flag：-data 数据目录、-port 端口、-no-browser；main.version 由 ldflags 注入，默认 dev）；rsrc_windows_amd64.syso 为 exe 图标
   internal/api/             HTTP 路由（server.go）、鉴权与本机/CSRF 中间件（middleware.go）、统一错误码（errors.go）
   internal/auth/            设备配对（PIN / 一次性码）、token 存储 devices.json、请求鉴权
   internal/config/          config.json 读写；Store 提供不可变快照 + 原子更新
@@ -15,11 +15,12 @@ server/                     Go 服务端，module lfb/server
   internal/media/           按扩展名判定类别与 MIME
   internal/web/             内嵌本机管理页静态文件（static/：原生 HTML/CSS/JS）
   internal/discovery/       局域网自动发现（P3，尚为空）
-  configs/ installer/       配置示例 / Inno Setup 脚本（均尚为空）
+  configs/                  配置示例（尚为空）
+  installer/                Inno Setup 脚本 lfb-server.iss、简体中文语言文件、图标 lfb.ico（02 §6）
 app/                        Flutter 工程 lfb_app（lib/ 下 api models pages widgets services；Android 原生代码在 android/app/src/main/kotlin）
 docs/                       设计文档 01–07
 docs/desgin/                设计稿、图标、DECISIONS.md（目录名就是 desgin，保持原拼写，勿改名）
-.github/workflows/          release.yml（尚未创建）
+.github/workflows/          release.yml（tag v* 发布）、ci.yml（main 分支检查）
 ```
 
 ## 常用命令

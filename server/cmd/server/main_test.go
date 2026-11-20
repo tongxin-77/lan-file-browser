@@ -3,9 +3,25 @@ package main
 import (
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+// 首次运行判定：数据目录下没有 config.json 时才自动打开管理页。
+func TestConfigExists(t *testing.T) {
+	dir := t.TempDir()
+	if configExists(dir) {
+		t.Fatal("空目录不应视为已有配置")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !configExists(dir) {
+		t.Fatal("已有 config.json 应视为非首次运行")
+	}
+}
 
 // Shutdown 超时（有请求卡住）后应强制 Close 并正常返回，而非报错退出。
 func TestShutdownForceClose(t *testing.T) {
