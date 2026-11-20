@@ -120,6 +120,7 @@ class ApkDownload {
   IOSink? _sink;
   Completer<void>? _finished;
   bool _cancelled = false;
+  bool _failing = false;
 
   /// 下载完成得到文件；取消时以 [DownloadCancelled] 结束。
   Future<File> get done => _done.future;
@@ -135,8 +136,8 @@ class ApkDownload {
       if (res.statusCode != 200) {
         throw HttpException('下载失败（${res.statusCode}）', uri: url);
       }
-      if (_cancelled) throw const DownloadCancelled();
       await _dest.parent.create(recursive: true);
+      if (_cancelled) throw const DownloadCancelled();
       final sink = _sink = _dest.openWrite();
       var got = 0;
       final finished = _finished = Completer<void>();
@@ -168,8 +169,11 @@ class ApkDownload {
     _cancelled = true;
     _sub?.cancel();
     final f = _finished;
-    if (f != null && !f.isCompleted) f.completeError(const DownloadCancelled());
-    _fail(const DownloadCancelled());
+    if (f == null) {
+      _fail(const DownloadCancelled()); // 尚未开始写文件：_run 稍后见 _cancelled 退出
+    } else if (!f.isCompleted) {
+      f.completeError(const DownloadCancelled()); // 由 _run 关闭文件并清理
+    }
   }
 
   void _finish(File f) {
@@ -179,7 +183,8 @@ class ApkDownload {
   }
 
   Future<void> _fail(Object e) async {
-    if (_done.isCompleted) return;
+    if (_done.isCompleted || _failing) return;
+    _failing = true;
     if (_ownsClient) _client.close();
     try {
       await _sink?.close();

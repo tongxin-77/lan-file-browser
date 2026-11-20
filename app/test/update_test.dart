@@ -203,17 +203,37 @@ void main() {
         (req, _) async => http.StreamedResponse(ctrl.stream, 200),
       );
       final dest = File('${dir.path}/c.apk');
+      final started = Completer<void>();
+      final dl = ApkDownload.start(
+        Uri.parse('http://h/x'),
+        dest,
+        httpClient: client,
+        onProgress: (_, _) {
+          if (!started.isCompleted) started.complete();
+        },
+      );
+      ctrl.add([1, 2, 3]);
+      await started.future; // 已开始写文件后再取消
+      dl.cancel();
+      await expectLater(dl.done, throwsA(isA<DownloadCancelled>()));
+      expect(dest.existsSync(), isFalse);
+      await ctrl.close();
+    });
+
+    test('尚未收到响应时取消也立即结束，且之后不再写文件', () async {
+      final res = Completer<http.StreamedResponse>();
+      final client = MockClient.streaming((req, _) => res.future);
+      final dest = File('${dir.path}/e.apk');
       final dl = ApkDownload.start(
         Uri.parse('http://h/x'),
         dest,
         httpClient: client,
       );
-      ctrl.add([1, 2, 3]);
-      await Future<void>.delayed(Duration.zero);
       dl.cancel();
       await expectLater(dl.done, throwsA(isA<DownloadCancelled>()));
+      res.complete(http.StreamedResponse(Stream.value([1]), 200));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(dest.existsSync(), isFalse);
-      await ctrl.close();
     });
 
     test('HTTP 错误以异常结束且不留文件', () async {
