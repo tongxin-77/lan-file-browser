@@ -168,4 +168,14 @@ func TestAppLatestAndAPK(t *testing.T) {
 	if w := e.req("GET", "/api/app/apk/arm64-v8a", phone, "", nil); w.Code != 401 {
 		t.Fatalf("无 token: %d", w.Code)
 	}
+	// ?v=（加密片库会话）与 APK 无关：不代替 ?t=，附带任意值也不影响下载
+	if w := e.req("GET", "/api/app/apk/arm64-v8a?v=bogus", phone, "", nil); w.Code != 401 {
+		t.Fatalf("仅 ?v=: %d", w.Code)
+	}
+	if w := e.req("GET", "/api/app/apk/arm64-v8a?t="+tok+"&v=bogus", phone, "", nil); w.Code != 200 || w.Body.String() != "0123456789-arm64" {
+		t.Fatalf("?t= 加 ?v=: %d %q", w.Code, w.Body)
+	}
+	if v := vaultToken(httptest.NewRequest("GET", "/api/app/apk/arm64-v8a?v=x", nil)); v != "" {
+		t.Fatalf("/api/app/apk 不应读取 ?v=: %q", v)
+	}
 }

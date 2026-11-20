@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"image"
 	"image/png"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"lfb/server/internal/config"
+	"lfb/server/internal/organize"
 	"lfb/server/internal/thumb"
 	"lfb/server/internal/vault"
 )
@@ -433,4 +435,57 @@ func jsonStr(s string) string {
 	var b bytes.Buffer
 	json.NewEncoder(&b).Encode(s)
 	return strings.TrimSpace(b.String())
+}
+
+type orgClock struct{ t time.Time }
+
+func (c *orgClock) Now() time.Time                                   { return c.t }
+func (c *orgClock) Sleep(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+
+// 整理库是加密片库时，未解锁设备看不到整理产生的文件（与不存在一致），解锁后可见。
+func TestVaultOrganizedHidden(t *testing.T) {
+	s, _ := newVaultServer(t)
+	srcDir, lib := t.TempDir(), t.TempDir()
+	mt := time.Date(2025, 6, 1, 8, 0, 0, 0, time.Local)
+	f := filepath.Join(srcDir, "Show.S01E01.mkv")
+	if err := os.WriteFile(f, make([]byte, 4096), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Chtimes(f, mt, mt)
+	v, err := vault.Hash("1234", cheapParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zero := 0
+	s.Config.Update(func(c *config.Config) error {
+		c.Shares = append(c.Shares, config.Share{ID: "vlib", Name: "整理库", Path: lib, Vault: v,
+			Organize: &config.Organize{Enabled: true, RateLimit: &zero,
+				Sources: []config.OrganizeSource{{ID: "s1", Path: srcDir, Mode: config.OrganizeCopy}}}})
+		return nil
+	})
+	clk := &orgClock{time.Now()}
+	m := organize.New(organize.Options{Config: s.Config, DB: s.Store, Clock: clk,
+		SameVolume: func(a, b string) bool { return false }})
+	for range 2 { // 首次扫描只观察，第二次复制
+		if err := m.RunOnce(context.Background(), "vlib"); err != nil {
+			t.Fatal(err)
+		}
+		clk.t = clk.t.Add(time.Minute)
+	}
+	const rel = "剧集/Show/第1季/Show.S01E01.mkv"
+	if _, err := os.Stat(filepath.Join(lib, filepath.FromSlash(rel))); err != nil {
+		t.Fatalf("应已整理到库内: %v", err)
+	}
+
+	for _, tpl := range []string{"/api/list?share=%s&path=", "/api/list?share=%s&path=剧集/Show/第1季", "/api/file?share=%s&path=" + rel} {
+		got := fget(t, s, "tok1", target(tpl, "vlib"))
+		want := fget(t, s, "tok1", target(tpl, "nosuch"))
+		if got.Code != 404 || got.Body.String() != want.Body.String() {
+			t.Errorf("未解锁 %s: %d %s", tpl, got.Code, got.Body)
+		}
+	}
+	sess := mustUnlock(t, s, "tok1", "1234")
+	if w := fget(t, s, "tok1", target("/api/file?share=%s&path="+rel, "vlib"), "X-Vault", sess); w.Code != 200 {
+		t.Errorf("解锁后应可访问: %d %s", w.Code, w.Body)
+	}
 }
