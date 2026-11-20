@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<!-- 本机管理页（v5 家庭放映室）。数据全部来自 /api/admin/*、/api/devices，仅本机可打开。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>家庭放映室 · LAN File Browser</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="curtain l" aria-hidden="true"></div>
+<div class="curtain r" aria-hidden="true"></div>
+<div class="valance" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="brand">
+    <h1>家庭放映室</h1>
+    <p>把这台电脑里的电影、动漫和相册，放给家里的手机看</p>
+  </div>
+  <div class="booth" aria-label="服务状态">
+    <div class="lamp" id="lamp"><i></i><span id="lampText">放映机运行中</span></div>
+    <div class="kv"><small>电脑名</small><b id="pcName">…</b></div>
+    <div class="kv"><small>手机连这个地址</small><b id="addr">…</b></div>
+    <div class="kv"><small>当前版本</small><b id="ver">…</b></div>
+  </div>
+</header>
+
+<main>
+  <section aria-labelledby="libTitle">
+    <div class="sec-head">
+      <h2 id="libTitle">片库<span id="libCount"></span></h2>
+      <p>点一张海报，在下面设置手机能做什么</p>
+    </div>
+    <div class="wall" id="wall"></div>
+    <div class="sheet" id="sheet" aria-live="polite">
+      <!-- 以下两个挂载点由 app.js 的 renderSheet 在每次重绘后移回放映单内（加密片库 → “手机能做什么”一栏末尾，
+           自动整理 → 放映单末尾），并派发 document 事件 "lfb:sheet"（detail.share 为当前片库或 null）。
+           各自的内容只由对应 JS 管理，默认隐藏。 -->
+      <!-- 加密片库设置（04 文档；vault.js） -->
+      <div class="vault" id="vaultPanel" hidden></div>
+      <!-- 自动整理（06 文档第 10 节；organize.js） -->
+      <div class="organize" id="organizePanel" hidden></div>
+    </div>
+  </section>
+
+  <aside>
+    <section class="ticket" aria-labelledby="pairTitle">
+      <h2 id="pairTitle">让新手机入场</h2>
+      <p class="lead">在手机 App 里扫这张码，或手动输入下面的 6 位数字</p>
+      <div class="qr" id="qr" role="img" aria-label="配对二维码"></div>
+      <div class="stub">
+        <small>配对码</small>
+        <div class="pin" id="pin">··· ···</div>
+        <div class="stub-row">
+          <span class="timer" id="timer"></span>
+          <button class="btn ghost" id="refreshPin">换一组</button>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="seatTitle">
+      <div class="sec-head"><h2 id="seatTitle">已入座的手机<span id="phoneCount"></span></h2></div>
+      <ul class="seats" id="seats"></ul>
+    </section>
+
+    <p class="foot">这个管理页只能在这台电脑上打开。<br>手机和电脑要连同一个 Wi-Fi。</p>
+  </aside>
+</main>
+
+<!-- 添加片库 -->
+<dialog id="addDlg">
+  <form class="dlg" id="addForm" novalidate>
+    <h3>添加片库</h3>
+    <p>选一个电脑上的文件夹，手机就能浏览和播放里面的内容。</p>
+    <label class="field"><span>文件夹路径 <em>在下面点选，或直接粘贴</em></span>
+      <input class="mono" id="addPath" placeholder="D:\Movies" autocomplete="off"></label>
+    <div class="picker" id="picker">
+      <div class="picker-bar">
+        <button type="button" class="btn ghost" id="pickUp">上一级</button>
+        <span id="pickWhere">此电脑</span>
+      </div>
+      <ul id="pickList"></ul>
+    </div>
+    <div class="err" id="addErr" role="alert"></div>
+    <label class="field"><span>手机上显示的名字 <em>可不填，默认用文件夹名</em></span>
+      <input id="addName" placeholder="例如：纪录片" autocomplete="off" maxlength="64"></label>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" data-close>取消</button>
+      <button type="submit" class="btn main" id="addOk">添加片库</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 通用确认 -->
+<dialog id="confirmDlg">
+  <div class="dlg">
+    <h3 id="cfTitle"></h3>
+    <p id="cfText"></p>
+    <div class="dlg-actions">
+      <button class="btn ghost" data-close>先不了</button>
+      <button class="btn danger solid" id="cfOk"></button>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="/app.js"></script>
+<script src="/vault.js"></script>
+<script src="/organize.js"></script>
+</body>
+</html>
