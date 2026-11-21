@@ -16,9 +16,11 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.net.Inet4Address
 
 class MainActivity : FlutterActivity() {
     private var wifiLock: WifiManager.WifiLock? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
     private var wifiCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -36,6 +38,16 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                     "isVpnActive" -> result.success(isVpnActive())
+                    // 局域网自动发现（docs/01-connection.md 2.2）
+                    "acquireMulticastLock" -> {
+                        acquireMulticastLock()
+                        result.success(null)
+                    }
+                    "releaseMulticastLock" -> {
+                        releaseMulticastLock()
+                        result.success(null)
+                    }
+                    "wifiAddress" -> result.success(wifiAddress())
                     "deviceName" -> result.success("${Build.MANUFACTURER} ${Build.MODEL}")
                     // 加密片库：最近任务缩略图空白、禁止截屏（docs/04-vault.md 8）
                     "setSecure" -> {
@@ -104,6 +116,42 @@ class MainActivity : FlutterActivity() {
         wifiLock = null
     }
 
+    private fun acquireMulticastLock() {
+        if (multicastLock?.isHeld == true) return
+        try {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            multicastLock = wm.createMulticastLock("lfb:discovery").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (ignored: Exception) {
+        }
+    }
+
+    private fun releaseMulticastLock() {
+        multicastLock?.let { if (it.isHeld) it.release() }
+        multicastLock = null
+    }
+
+    // Wi-Fi / 有线（非 VPN）网络的 IPv4 "地址/前缀"，供 Dart 计算子网广播地址
+    private fun wifiAddress(): String? {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return null
+        @Suppress("DEPRECATION")
+        for (n in cm.allNetworks) {
+            val caps = cm.getNetworkCapabilities(n) ?: continue
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+            if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                !caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            ) continue
+            val lp = cm.getLinkProperties(n) ?: continue
+            for (la in lp.linkAddresses) {
+                val a = la.address
+                if (a is Inet4Address) return "${a.hostAddress}/${la.prefixLength}"
+            }
+        }
+        return null
+    }
+
     // 开着 VPN 时让整个进程绕过 VPN 走 Wi-Fi（docs/01-connection.md 7.1）。
     // 默认 NetworkRequest 带 NOT_VPN，只匹配底层 Wi-Fi；VPN 不允许绕过时绑定失败，忽略即可。
     private fun bindProcessToWifi() {
@@ -147,6 +195,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         releaseWifiLock()
+        releaseMulticastLock()
         wifiCallback?.let {
             try {
                 getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(it)

@@ -12,6 +12,7 @@ import 'package:lfb_app/app.dart';
 import 'package:lfb_app/models/server.dart';
 import 'package:lfb_app/pages/connect_page.dart';
 import 'package:lfb_app/pages/startup_page.dart';
+import 'package:lfb_app/services/discovery.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 已保存凭据只在服务端明确 token 无效时清除（01 §3.3、§6）。
@@ -29,6 +30,7 @@ void main() {
       'lastServerId': 's1',
     });
     FlutterSecureStorage.setMockInitialValues({'token_s1': 'tok'});
+    lanDiscovery.probe = (_, _) async => []; // 不发真实 UDP
   });
 
   http.Response ping(String id, {bool needPair = false}) => http.Response(
@@ -89,7 +91,7 @@ void main() {
         token: 'tok',
         serverId: 's1',
         fallbackHosts: const ['10.0.0.2', '10.0.0.3'],
-        onHostChanged: (h) => changed = h,
+        onHostChanged: (h, _) => changed = h,
         onUnauthorized: () => unauthorized = true,
         httpClient: MockClient((req) async {
           if (req.url.host == '10.0.0.1') {
@@ -242,6 +244,105 @@ void main() {
       );
       final (s, token) = (await serverStore.lastServer())!;
       expect((s.lastIp, token), ('10.0.0.1', 'tok'));
+    });
+  });
+
+  group('reconnect 按 serverId 重新发现', () {
+    test('已知地址都不通：用发现到的新地址与端口，并回调保存', () async {
+      (String, int)? changed;
+      final client = LfbClient(
+        host: '10.0.0.1',
+        port: 8686,
+        token: 'tok',
+        serverId: 's1',
+        onHostChanged: (h, p) => changed = (h, p),
+        rediscover: () async => (hosts: ['192.168.1.9'], port: 9000),
+        httpClient: MockClient((req) async {
+          if (req.url.host == '192.168.1.9' && req.url.port == 9000) {
+            return ping('s1');
+          }
+          throw const SocketException('unreachable');
+        }),
+      );
+      await client.reconnect();
+      expect((client.host, client.port), ('192.168.1.9', 9000));
+      expect(changed, ('192.168.1.9', 9000));
+    });
+
+    test('token 无效时不再查找', () async {
+      var asked = false;
+      final client = LfbClient(
+        host: '10.0.0.1',
+        port: 8686,
+        token: 'tok',
+        serverId: 's1',
+        rediscover: () async {
+          asked = true;
+          return null;
+        },
+        httpClient: MockClient((_) async => ping('s1', needPair: true)),
+      );
+      await expectLater(client.reconnect(), throwsA(isA<ApiException>()));
+      expect(asked, isFalse);
+    });
+
+    test('LanDiscovery.find：广播到 255.255.255.255，按 id 匹配', () async {
+      List<String>? targets;
+      final d = LanDiscovery(
+        probe: (t, _) async {
+          targets = t;
+          return [
+            ('192.168.1.3', utf8.encode('{"id":"other","port":8686}')),
+            (
+              '192.168.1.9',
+              utf8.encode(
+                '{"id":"s1","name":"书房","port":8686,"ips":["10.8.0.2"]}',
+              ),
+            ),
+          ];
+        },
+      );
+      final s = await d.find('s1');
+      expect(targets, contains('255.255.255.255'));
+      expect(s!.candidates, ['192.168.1.9', '10.8.0.2']);
+      expect(await d.find('s2'), isNull);
+    });
+  });
+
+  group('发现结果解析', () {
+    test('合法回复；非法内容忽略；同 id 多网卡回复合并地址', () {
+      final list = mergeReplies([
+        (
+          '192.168.1.5',
+          utf8.encode(
+            '{"id":"a","name":"MY-PC","version":"1.2.0","port":8686,'
+            '"ips":["192.168.1.5","10.0.0.3"]}',
+          ),
+        ),
+        ('192.168.1.6', utf8.encode('LFB_DISCOVER')),
+        ('192.168.1.7', utf8.encode('{"name":"no id","port":8686}')),
+        ('192.168.1.8', utf8.encode('{"id":"b","port":"8686"}')),
+        (
+          '172.20.0.1',
+          utf8.encode('{"id":"a","port":8686,"ips":["172.20.0.1"]}'),
+        ),
+      ]);
+      expect(list, hasLength(1));
+      final a = list.single;
+      expect(
+        (a.name, a.version, a.port, a.from),
+        ('MY-PC', '1.2.0', 8686, '192.168.1.5'),
+      );
+      expect(a.candidates, ['192.168.1.5', '10.0.0.3', '172.20.0.1']);
+    });
+
+    test('子网广播地址', () {
+      expect(broadcastAddress('192.168.1.23/24'), '192.168.1.255');
+      expect(broadcastAddress('10.1.2.3/8'), '10.255.255.255');
+      expect(broadcastAddress('172.16.5.4/20'), '172.16.15.255');
+      expect(broadcastAddress('192.168.1.2/32'), isNull);
+      expect(broadcastAddress('fe80::1/64'), isNull);
+      expect(broadcastAddress(null), isNull);
     });
   });
 }

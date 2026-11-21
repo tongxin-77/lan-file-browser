@@ -34,6 +34,32 @@ class PlatformService {
     }
   }
 
+  /// 自动发现期间持有 MulticastLock，部分机型否则收不到广播回复（01 §2.2）。
+  static Future<void> acquireMulticastLock() async {
+    try {
+      await _channel.invokeMethod<void>('acquireMulticastLock');
+    } on Exception {
+      // 忽略：非 Android 或系统拒绝
+    }
+  }
+
+  static Future<void> releaseMulticastLock() async {
+    try {
+      await _channel.invokeMethod<void>('releaseMulticastLock');
+    } on Exception {
+      // 同上
+    }
+  }
+
+  /// 当前 Wi-Fi / 有线网络的 IPv4 地址与前缀，如 `192.168.1.23/24`；无则 null。
+  static Future<String?> wifiAddress() async {
+    try {
+      return await _channel.invokeMethod<String>('wifiAddress');
+    } on Exception {
+      return null;
+    }
+  }
+
   /// 手机当前是否开着 VPN（任一网络带 TRANSPORT_VPN）。
   static Future<bool> isVpnActive() async {
     try {

@@ -78,7 +78,8 @@ class _StartupPageState extends State<StartupPage> {
     final client = clientFor(server, _token!);
     try {
       await client.reconnect();
-      if (mounted) openHome(server.withAddress(client.host), _token!);
+      if (!mounted) return;
+      openHome(server.withAddress(client.host, client.port), _token!);
     } on ApiException catch (e) {
       // 401 已由 onUnauthorized 清凭据并跳转连接页
       if (!e.isUnauthorized) _fail(e.message);

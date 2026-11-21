@@ -7,6 +7,7 @@ import '../api/probe.dart';
 import '../app.dart';
 import '../models/connect_uri.dart';
 import '../models/server.dart';
+import '../services/discovery.dart';
 import '../services/platform.dart';
 import '../theme.dart';
 import '../widgets/lamp_glow.dart';
@@ -33,12 +34,49 @@ class _ConnectPageState extends State<ConnectPage> {
   /// 已保存的电脑：点即用已保存凭据连接，无需重新配对。
   List<SavedServer> _saved = const [];
 
+  /// 局域网自动发现结果；null 表示正在扫描（01 §2.2）。
+  List<DiscoveredServer>? _found;
+
+  /// 点选的未配对电脑：填好地址，等用户输 PIN。
+  DiscoveredServer? _picked;
+  final _pinFocus = FocusNode();
+
   @override
   void initState() {
     super.initState();
     serverStore.paired().then((list) {
       if (mounted) setState(() => _saved = [for (final (s, _) in list) s]);
     });
+    _discover();
+  }
+
+  Future<void> _discover() async {
+    setState(() => _found = null);
+    final list = await lanDiscovery.scan();
+    if (mounted) setState(() => _found = list);
+  }
+
+  /// 已配对的直接用已保存凭据连接（顺便更新地址）；未配对的填好地址等输 PIN。
+  Future<void> _pick(DiscoveredServer d) async {
+    final saved = _saved.where((s) => s.serverId == d.id).firstOrNull;
+    if (saved != null) {
+      await serverStore.save(
+        SavedServer(
+          serverId: d.id,
+          name: saved.name,
+          lastIp: d.from,
+          port: d.port,
+          ips: d.ips,
+        ),
+      );
+      return _useSaved(saved);
+    }
+    setState(() {
+      _picked = d;
+      _error = null;
+      _addr.text = '${d.from}:${d.port}';
+    });
+    _pinFocus.requestFocus();
   }
 
   Future<void> _useSaved(SavedServer s) async {
@@ -53,6 +91,7 @@ class _ConnectPageState extends State<ConnectPage> {
   void dispose() {
     _addr.dispose();
     _pin.dispose();
+    _pinFocus.dispose();
     super.dispose();
   }
 
@@ -89,7 +128,13 @@ class _ConnectPageState extends State<ConnectPage> {
     final (host, port) = hp;
     await _run(() async {
       await LfbClient(host: host, port: port).ping();
-      await _pair(host, port, _pin.text);
+      final picked = _picked;
+      await _pair(
+        host,
+        port,
+        _pin.text,
+        ips: picked != null && picked.from == host ? picked.ips : const [],
+      );
     });
   }
 
@@ -179,6 +224,53 @@ class _ConnectPageState extends State<ConnectPage> {
                         onTap: () => _useSaved(s),
                       ),
                   ],
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          '局域网中的电脑',
+                          style: TextStyle(color: NightColors.ash),
+                        ),
+                      ),
+                      if (_found == null)
+                        const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else
+                        TextButton(
+                          onPressed: _busy ? null : _discover,
+                          child: const Text('重新扫描'),
+                        ),
+                    ],
+                  ),
+                  if (_found case final found? when found.isEmpty)
+                    const Text(
+                      '没有找到。路由器可能屏蔽了广播，可扫码或手动输入电脑 IP。',
+                      style: TextStyle(color: NightColors.ash, height: 1.5),
+                    ),
+                  for (final d in _found ?? const <DiscoveredServer>[])
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.computer_outlined),
+                      title: Text('${d.name} · ${d.from}'),
+                      trailing: _saved.any((s) => s.serverId == d.id)
+                          ? const Text(
+                              '已配对',
+                              style: TextStyle(color: NightColors.moss),
+                            )
+                          : null,
+                      enabled: !_busy,
+                      onTap: () => _pick(d),
+                    ),
+                  if (_picked case final p?) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      '请在下方输入「${p.name}」上显示的 6 位 PIN，然后点“配对”。',
+                      style: const TextStyle(height: 1.5),
+                    ),
+                  ],
                   if (_error != null) ...[
                     const SizedBox(height: 20),
                     Text(
@@ -220,6 +312,7 @@ class _ConnectPageState extends State<ConnectPage> {
                       child: TextField(
                         key: const Key('pin'),
                         controller: _pin,
+                        focusNode: _pinFocus,
                         enabled: !_busy,
                         keyboardType: TextInputType.number,
                         maxLength: 6,
