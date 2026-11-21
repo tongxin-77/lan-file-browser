@@ -430,10 +430,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (!mounted || _failure != null) return;
     if (_attempting || (_retryTimer?.isActive ?? false)) return;
     if (_retry >= _retryDelays.length) {
+      const failure = '连接中断。请确认电脑已开机且手机与电脑在同一网络。';
       setState(() {
         _reconnecting = false;
-        _failure = '连接中断。请确认电脑已开机且手机与电脑在同一网络。';
+        _failure = failure;
         _controls = true;
+      });
+      connectionErrorText(failure).then((m) {
+        if (mounted && _failure == failure) setState(() => _failure = m);
       });
       return;
     }

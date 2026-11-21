@@ -3,6 +3,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- 播放期间 WifiLock（docs/05-playback.md 2.4） -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 绑定 Wi-Fi 绕过 VPN、检测 VPN（docs/01-connection.md 7.1） -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 保存图片到相册：Android 10+ 走 MediaStore 无需权限，9 及以下需要（gal 插件） -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <!-- App 内更新：调用系统安装器（docs/02-release.md 5.2） -->

@@ -13,6 +13,7 @@
 | Windows 安装包（02 §6） | 本机只验证了编译（ISCC 6.7）与 exe 图标；安装需 UAC 提权，未实际安装 | 在 Windows 上实测：安装 / 覆盖升级时 `CloseApplications` 能否关闭无窗口的 `lfb-server.exe`（Restart Manager 对无窗口进程可能只能强制结束）、防火墙规则增删、开机自启、开始菜单“打开管理页”、安装完成后启动并打开管理页、卸载时删除 / 保留数据、首次运行自动打开浏览器 |
 | release.yml / ci.yml | 只经 actionlint 检查（本机无 shellcheck，未检查 run 脚本），尚未在 GitHub Actions 上实际运行 | 推送后看 CI 首次运行；首个 tag（可先打 `v0.1.0-beta.1` 预发布）核对产物命名、签名与 checksums |
 | 真机 / 真电视效果 | 设计稿、图标只在桌面浏览器中验证 | Flutter 端完成后在 Android 手机、电视盒子上实测 |
+| 手机开着 VPN 时绕过（01 §7.1） | 只编译通过 + Dart 单元测试，未上真机 | 真机验证：Clash Meta for Android 开 / 关 allowBypass（“允许应用绕过”）、规则 / 全局模式下能否连上电脑并播放；`bindProcessToNetwork` 对 libmpv 原生 socket 是否生效；不允许绕过时是否显示 VPN 提示且不崩溃；Wi-Fi 断开 / 切换后能否自动重新绑定 |
 | App 加密片库与 App 内更新（手机端 P2） | 只有单元 / widget 测试，未构建 APK、未上真机 | 真机验证：FLAG_SECURE（最近任务空白、截屏被拒）、切后台 / 锁屏 / 空闲 10 分钟上锁并停止播放、系统键盘数字 / 字母切换、“安装未知应用”授权引导、FileProvider 调起安装器、强制更新不可关闭 |
 
 ## 2. 已接受的安全风险

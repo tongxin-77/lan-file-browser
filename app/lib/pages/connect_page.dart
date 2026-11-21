@@ -107,7 +107,8 @@ class _ConnectPageState extends State<ConnectPage> {
         );
       }
     } on LfbException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      final message = await connectionErrorText(e.message);
+      if (mounted) setState(() => _error = message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

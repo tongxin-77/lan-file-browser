@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../api/api_exception.dart';
 import '../app.dart';
+import '../services/platform.dart';
 
 /// 启动：有已保存服务器则 ping 上次地址，成功进首页，失败回连接页提示（01 §6；
 /// UDP 按 serverId 重新发现后期实现）。
@@ -39,9 +40,10 @@ class _StartupPageState extends State<StartupPage> {
       }
     } on LfbException {
       showConnectPage(
-        message:
-            '连不上「${server.name}」（${server.lastIp}:${server.port}）。'
-            '请确认电脑已开机且在同一网络，或重新扫码。',
+        message: await connectionErrorText(
+          '连不上「${server.name}」（${server.lastIp}:${server.port}）。'
+          '请确认电脑已开机且在同一网络，或重新扫码。',
+        ),
         canRetry: true,
       );
     }
