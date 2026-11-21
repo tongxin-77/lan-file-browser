@@ -89,6 +89,19 @@ void main() {
     });
   });
 
+  test('倍速选项与显示', () {
+    expect(playbackRates, [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]);
+    expect(playbackRates.map(formatRate), [
+      '0.5×',
+      '0.75×',
+      '1.0×',
+      '1.25×',
+      '1.5×',
+      '2.0×',
+      '3.0×',
+    ]);
+  });
+
   test('预取与片尾卡片触发时机', () {
     const dur = Duration(minutes: 24);
     expect(shouldPrefetchNext(const Duration(minutes: 21), dur), isFalse);
