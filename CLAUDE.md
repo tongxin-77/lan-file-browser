@@ -14,7 +14,7 @@ server/                     Go 服务端，module lfb/server
   internal/listing/         目录列表自然排序
   internal/media/           按扩展名判定类别与 MIME
   internal/web/             内嵌本机管理页静态文件（static/：原生 HTML/CSS/JS）
-  internal/discovery/       局域网自动发现（P3，尚为空）
+  internal/discovery/       局域网自动发现：UDP 8687 应答 "LFB_DISCOVER"（01 §2.2）
   configs/                  配置示例（尚为空）
   installer/                Inno Setup 脚本 lfb-server.iss、简体中文语言文件、图标 lfb.ico（02 §6）
 app/                        Flutter 工程 lfb_app（lib/ 下 api models pages widgets services；Android 原生代码在 android/app/src/main/kotlin）

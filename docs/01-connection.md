@@ -73,6 +73,24 @@ App ◀──(UDP 单播回复 JSON {id,name,version,port,ips})── 服务端
 - 服务端回复是单播，App 无需 `MulticastLock`；部分机型若收不到，再申请 `CHANGE_WIFI_MULTICAST_STATE` + `MulticastLock` 兜底。
 - Flutter 端用 `dart:io` 的 `RawDatagramSocket`（`broadcastEnabled = true`）即可，无需第三方包。
 
+服务端实现（`server/internal/discovery`）：
+
+| 项 | 规则 |
+| ---- | ---- |
+| 监听 | UDP `0.0.0.0:8687`（仅 IPv4）；端口被占用时只记日志，HTTP 服务照常启动 |
+| 请求 | 数据报内容**恰为** 12 字节 ASCII `LFB_DISCOVER`（无换行、无结尾 0、区分大小写）；其他内容或长度一律不回复 |
+| 回复 | 单播到请求的来源地址与端口，UTF-8 JSON，只含 `id`（serverId）、`name`、`version`、`port`（HTTP 端口）、`ips`（同二维码，`LocalIPv4s`，最多 16 个）；不含 PIN、配对码、token、`needPair` |
+| 限速 | 按 1 秒窗口：同一来源 IP 最多回复 5 次、全部来源合计最多 50 次，超出的请求直接丢弃（防被伪造源地址用于放大） |
+| 开关 | `config.json` 的 `discovery.enabled`（默认 `true`），修改后重启服务端生效；管理页无开关 |
+
+回复示例：
+
+```json
+{"id":"d0e590cf-27d1-4e05-810a-320acf2a6ca7","name":"MY-PC","version":"1.2.0","port":8686,"ips":["192.168.1.5","10.0.0.3"]}
+```
+
+App 收到回复后按 2.1 的方式并发 `GET /api/ping` 选 IP（回复的来源地址可优先尝试），`needPair` 以 ping 结果为准。
+
 发现到服务器后，若 `needPair=true`，App 提示用户输入服务端控制台/本机网页显示的 **6 位 PIN**。
 
 ### 2.3 手动输入 IP:端口
