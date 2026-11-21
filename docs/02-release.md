@@ -136,8 +136,8 @@ APK 签名：
 | 运行形态 | 无控制台窗口（`-H windowsgui`）；日志写入数据目录 `logs\server.log`（超过 10MB 启动时轮换为 `.1`）；首次运行（数据目录下尚无 `config.json`）时自动用默认浏览器打开管理页，`-no-browser` 禁用。托盘图标（打开管理网页 / 显示二维码 / 退出）**尚未实现** |
 | 图标 | `server/installer/lfb.ico`（图标 2，16–256 多尺寸）：安装包 `SetupIconFile`；exe 通过 `server/cmd/server/rsrc_windows_amd64.syso` 嵌入（`go run github.com/akavel/rsrc@v0.10.2 -arch amd64 -ico installer/lfb.ico -o cmd/server/rsrc_windows_amd64.syso` 生成，更换图标时重新生成） |
 | 界面语言 | 简体中文：`server/installer/ChineseSimplified.isl`（Inno Setup 非官方翻译，官方安装包不带，随仓库提供），需 Inno Setup 6.5+ |
-| 升级 | `AppId` 固定，同 AppId 覆盖安装；`CloseApplications=yes` 自动关闭运行中的旧进程 |
-| 卸载 | 开始菜单 + “设置 → 应用”中的卸载项；卸载前结束 `lfb-server.exe` 进程 |
+| 升级 | `AppId` 固定，同 AppId 覆盖安装。程序无窗口，`CloseApplications`（Restart Manager）关不掉它，改由 `[Code]` 的 `PrepareToInstall` 关闭：若有 `lfb-server.exe` 进程（WMI 按进程名查），先 `OpenEvent`+`SetEvent` 置位命名事件 `Local\LanFileBrowserShutdown`（服务端 `cmd/server/shutdownevent.go` 监听，收到后走与 Ctrl+C 相同的优雅退出），8 秒内未退出再 `taskkill /F /IM lfb-server.exe`，再等最多 10 秒；仍未退出则中止安装并提示到任务管理器结束。安装程序虽提权运行，但与用户同一登录会话，`Local\` 可互通；其他会话 / 用户的进程打不开事件，直接强杀。完成页“启动”选项不变；静默安装（`/SILENT`、`/VERYSILENT`，供一键更新）时若之前在运行，装完自动以原用户 `-no-browser` 重新启动 |
+| 卸载 | 开始菜单 + “设置 → 应用”中的卸载项；卸载开始前（`usUninstall`）用与升级相同的方式关闭服务端，失败时提示（非静默）后继续卸载 |
 
 本地编译安装包（在 `server/` 下）：`go build -ldflags "-s -w -H windowsgui -X main.version=0.1.0" -o dist/lfb-server.exe ./cmd/server`，再 `iscc /DAppVersion=0.1.0 installer\lfb-server.iss`，输出 `dist\lfb-server-setup-0.1.0.exe`。
 

@@ -101,6 +101,13 @@ func run(dataDir string, port int, updateAPI string, browser bool) error {
 	// SIGTERM：Windows 关闭控制台窗口、注销、关机（CTRL_CLOSE/LOGOFF/SHUTDOWN_EVENT）
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// 安装 / 卸载程序通过命名事件请求退出（无窗口进程收不到关闭消息）
+	if c, cancel, err := notifyShutdownEvent(ctx, shutdownEventName); err != nil {
+		log.Printf("退出事件未创建，安装程序将强制结束本进程: %v", err)
+	} else {
+		ctx = c
+		defer cancel()
+	}
 	go act.Run(ctx)
 	updDone := make(chan struct{})
 	go func() { updates.Run(ctx); close(updDone) }()

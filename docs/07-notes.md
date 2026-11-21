@@ -10,7 +10,7 @@
 | 并发数据竞争检测 `go test -race` | 需要 cgo，本机 `CGO_ENABLED=0` 且未装 gcc | 安装 gcc（如 MSYS2 mingw-w64），`CGO_ENABLED=1 go test -race ./...` |
 | 8.3 短文件名真实卷测试 | 开发机卷未生成 8.3 短名 | 在开启短名的卷（`fsutil 8dot3name query`）上运行 `TestOpenRejectsShortNames`；当前由第 3 层逻辑测试覆盖 |
 | 检查更新与 APK 缓存（02 §5） | 目前只用伪造的 GitHub 服务验证 | 首个真实 Release 发布后，用正式版本号构建服务端实测管理页横幅、安装包下载、`update.mirror` 与 `/api/app/latest`、`/api/app/apk/{abi}` |
-| Windows 安装包（02 §6） | 本机只验证了编译（ISCC 6.7）与 exe 图标；安装需 UAC 提权，未实际安装 | 在 Windows 上实测：安装 / 覆盖升级时 `CloseApplications` 能否关闭无窗口的 `lfb-server.exe`（Restart Manager 对无窗口进程可能只能强制结束）、防火墙规则增删、开机自启、开始菜单“打开管理页”、安装完成后启动并打开管理页、卸载时删除 / 保留数据、首次运行自动打开浏览器 |
+| Windows 安装包（02 §6） | 本机只验证了编译（ISCC 6.7）与 exe 图标；安装需 UAC 提权，未实际安装 | 在 Windows 上实测：覆盖升级 / 卸载时关闭运行中的 `lfb-server.exe`（本机只以非提权的测试安装包验证过事件优雅退出与 taskkill 兜底；需验证提权安装程序能打开普通用户进程创建的 `Local\LanFileBrowserShutdown`，日志 `logs\server.log` 有“正在退出…”即走了优雅路径）、`/VERYSILENT` 覆盖安装后自动重新启动、防火墙规则增删、开机自启、开始菜单“打开管理页”、安装完成后启动并打开管理页、卸载时删除 / 保留数据、首次运行自动打开浏览器 |
 | release.yml / ci.yml | 只经 actionlint 检查（本机无 shellcheck，未检查 run 脚本），尚未在 GitHub Actions 上实际运行 | 推送后看 CI 首次运行；首个 tag（可先打 `v0.1.0-beta.1` 预发布）核对产物命名、签名与 checksums |
 | 真机 / 真电视效果 | 设计稿、图标只在桌面浏览器中验证 | Flutter 端完成后在 Android 手机、电视盒子上实测 |
 | 手机开着 VPN 时绕过（01 §7.1） | 只编译通过 + Dart 单元测试，未上真机 | 真机验证：Clash Meta for Android 开 / 关 allowBypass（“允许应用绕过”）、规则 / 全局模式下能否连上电脑并播放；`bindProcessToNetwork` 对 libmpv 原生 socket 是否生效；不允许绕过时是否显示 VPN 提示且不崩溃；Wi-Fi 断开 / 切换后能否自动重新绑定 |
