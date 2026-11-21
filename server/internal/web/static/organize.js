@@ -16,8 +16,8 @@
 
   var STATE = { idle: "空闲", scanning: "扫描中", copying: "复制中", paused: "已暂停", offline: "片库离线" };
   var REASON = { manual: "手动暂停", lowSpace: "片库所在硬盘空间不足", playback: "有人正在播放同一块硬盘上的视频" };
-  var ACTION = { copy: "复制", move: "移动", rename: "移动（同分区直接改名）", duplicate: "重复，跳过", waiting: "下载中，暂不整理", locked: "被占用", done: "已整理过" };
-  var CAT = { photo: "照片", episode: "剧集", movie: "电影", unsorted: "未分类" };
+  var ACTION = { copy: "复制", move: "移动", rename: "移动（同分区直接改名）", duplicate: "重复，跳过", waiting: "下载中，暂不整理", locked: "被占用", done: "已整理过", skip: "不整理" };
+  var CAT = { photo: "照片", episode: "剧集", movie: "电影", unsorted: "未分类", kept: "原结构" };
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -133,6 +133,8 @@
         '<label><input type="radio" name="org-mode-' + i + '" data-org-mode="' + i + '" value="move"' + (move ? " checked" : "") + "> 移动<small>复制并校验后处理源文件</small></label>" +
         (move ? '<select data-org-after="' + i + '"><option value="recycle"' + (s.afterMove !== "delete" ? " selected" : "") + '>移入回收站（默认）</option>' +
           '<option value="delete"' + (s.afterMove === "delete" ? " selected" : "") + ">直接删除</option></select>" : "") +
+        '<label><input type="checkbox" data-org-keep="' + i + '"' + (s.keepStructure ? " checked" : "") + "> 保持源文件夹结构" +
+          "<small>" + (s.keepStructure ? "按原来的子文件夹放进片库，不自动归类" : "按照片、剧集、电影自动归类") + "</small></label>" +
       "</div>" +
       (move && s.afterMove === "delete" ? '<p class="org-warn">删除后无法从回收站恢复</p>' : "") +
       (hint && hint.sameDisk ? '<p class="org-warn">两者在同一块硬盘上，整理后播放仍会与下载争用同一块盘，无法解决卡顿</p>' : "") +
@@ -272,7 +274,7 @@
         var p = panel.querySelector("[data-org-input]").value.trim().replace(/^"|"$/g, "");
         if (!/^[A-Za-z]:\\/.test(p) && !/^\\\\/.test(p)) { toast("请选一个文件夹，或填写完整路径，例如 D:\\Downloads"); break; }
         picking = null;
-        save(function (o) { o.sources.push({ id: "", path: p, mode: "copy" }); }, "已添加源文件夹");
+        save(function (o) { o.sources.push({ id: "", path: p, mode: "copy", keepStructure: true }); }, "已添加源文件夹");
         break;
       case "scan":
         api("POST", base() + "/scan").then(function () { toast("已开始扫描（新文件要两次扫描都没变化才会整理）"); setTimeout(poll, 800); }).catch(fail);
@@ -304,6 +306,9 @@
         o.sources[i].mode = mode;
         o.sources[i].afterMove = mode === "move" ? (o.sources[i].afterMove || "recycle") : "";
       });
+    } else if (t.dataset.orgKeep) {
+      var k = +t.dataset.orgKeep, keep = t.checked;
+      save(function (o) { o.sources[k].keepStructure = keep; }, keep ? "将保持源文件夹结构" : "将按类型自动归类");
     } else if (t.dataset.orgAfter) {
       var j = +t.dataset.orgAfter, v = t.value;
       save(function (o) { o.sources[j].afterMove = v; }, v === "delete" ? "源文件整理后将直接删除" : "源文件整理后移入回收站");

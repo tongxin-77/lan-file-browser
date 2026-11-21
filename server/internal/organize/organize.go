@@ -288,7 +288,13 @@ func (m *Manager) Startup() {
 		if sh.Organize == nil {
 			continue
 		}
-		for _, top := range []string{"照片", "剧集", "电影", "未分类"} {
+		tops := []string{"照片", "剧集", "电影", "未分类"}
+		for _, src := range sh.Organize.Sources {
+			if src.KeepStructure { // 保持结构时临时文件可能在库目录任意位置
+				tops = []string{""}
+			}
+		}
+		for _, top := range tops {
 			filepath.WalkDir(filepath.Join(sh.Path, top), func(p string, d os.DirEntry, err error) error {
 				if err == nil && !d.IsDir() && strings.HasPrefix(d.Name(), tempPrefix) {
 					os.Remove(p)
@@ -437,7 +443,10 @@ func (m *Manager) observe(r *shareRT, obs map[string]obsRec, p params, src confi
 		old.Size, old.Mtime, old.SrcPath = e.Size, e.Mtime.UnixNano(), e.Rel
 		return "known", saveItem(m.o.DB, old, now)
 	}
-	plan := classify(e.Rel, e.Mtime, photoTimeFunc(f, e.Rel))
+	plan, ok := planFor(src, e, photoTimeFunc(f, e.Rel))
+	if !ok {
+		return "skip", nil
+	}
 	it := &Item{ShareID: p.share.ID, SourceID: src.ID, SrcPath: e.Rel, SrcKey: key, Size: e.Size, Mtime: e.Mtime.UnixNano(),
 		Fingerprint: fp, Kind: e.Kind, Category: plan.Category, TargetPath: plan.Target(), State: StateQueued}
 	return "queued", insertItem(m.o.DB, it, now)
@@ -653,8 +662,10 @@ func (m *Manager) copyItem(ctx context.Context, r *shareRT, p params, src config
 	defer root.Close()
 	dir, name := path.Split(it.TargetPath)
 	dir = strings.TrimSuffix(dir, "/")
-	if err := root.MkdirAll(dir, 0o755); err != nil {
-		return fail(err)
+	if dir != "" { // 保持结构时可能直接放在库目录根
+		if err := root.MkdirAll(dir, 0o755); err != nil {
+			return fail(err)
+		}
 	}
 	move := src.Mode == config.OrganizeMove
 
@@ -855,7 +866,7 @@ type DryItem struct {
 	SrcPath    string `json:"srcPath"`
 	Category   string `json:"category"`
 	TargetPath string `json:"targetPath"`
-	Action     string `json:"action"` // copy move rename duplicate waiting locked done
+	Action     string `json:"action"` // copy move rename duplicate waiting locked done skip
 	Note       string `json:"note,omitempty"`
 }
 
@@ -891,7 +902,7 @@ func (m *Manager) DryRun(id string) ([]DryItem, int, error) {
 			}
 			total++
 			d := m.dryOne(root, p, src, e)
-			if e.Kind == KindVideo {
+			if e.Kind == KindVideo && d.Action != "skip" {
 				planned = append(planned, Item{SrcKey: strings.ToLower(e.Rel), TargetPath: d.TargetPath, Category: d.Category})
 			}
 			if len(items) < dryRunMax {
@@ -934,19 +945,23 @@ func (m *Manager) dryOne(root *os.Root, p params, src config.OrganizeSource, e e
 		d.Category, d.TargetPath, d.Action, d.Note = rec.Category, rec.TargetPath, "done", "已整理过"
 		return d
 	}
+	if _, ok := planFor(src, e, nil); !ok {
+		d.Action, d.Note = "skip", "路径里有不能用的名字，不整理"
+		return d
+	}
 	if e.Partial {
-		plan := classify(e.Rel, e.Mtime, nil)
+		plan, _ := planFor(src, e, nil)
 		d.Category, d.TargetPath, d.Action, d.Note = plan.Category, plan.Target(), "waiting", "下载中，暂不整理"
 		return d
 	}
 	f, err := openSourceRead(srcAbs(src, e.Rel))
 	if err != nil {
-		plan := classify(e.Rel, e.Mtime, nil)
+		plan, _ := planFor(src, e, nil)
 		d.Category, d.TargetPath, d.Action, d.Note = plan.Category, plan.Target(), "locked", "被其他程序占用（可能在下载或做种）"
 		return d
 	}
 	defer f.Close()
-	plan := classify(e.Rel, e.Mtime, photoTimeFunc(f, e.Rel))
+	plan, _ := planFor(src, e, photoTimeFunc(f, e.Rel))
 	d.Category, d.TargetPath, d.Action = plan.Category, plan.Target(), actionFor(src, p, m)
 	if fi, err := root.Lstat(plan.Target()); err == nil && fi.Mode().IsRegular() && fi.Size() == e.Size {
 		if fp, err := fingerprint(f, e.Size); err == nil && verify(root, plan.Target(), e.Size, fp) == nil {

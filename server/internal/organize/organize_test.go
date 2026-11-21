@@ -729,3 +729,93 @@ func TestDiskKeyAndCheckPath(t *testing.T) {
 		t.Fatal("sameDisk")
 	}
 }
+
+// 保持源文件夹结构：相对源文件夹根的路径原样保留，不按类型/剧名归类；重名、字幕跟随照旧。
+func TestKeepStructure(t *testing.T) {
+	e := newEnv(t, func(o *config.Organize) { o.Sources[0].KeepStructure = true }, nil)
+	mt := time.Date(2025, 6, 1, 8, 0, 0, 0, time.Local)
+	e.write("A/B/C/Show.S01E01.mkv", data(3000, 1), mt)
+	e.write("A/B/C/Show.S01E01.chs.srt", []byte("1\n"), mt)
+	e.write("A/IMG_20250101_120000.jpg", data(500, 2), mt)
+	e.write("root.mp4", data(800, 3), mt)
+	e.write("A/.hidden/x.mkv", data(10, 4), mt)
+	os.WriteFile(filepath.Join(e.lib, "root.mp4"), data(900, 5), 0o644) // 片库里已有同名不同内容
+
+	items, total, err := e.m.DryRun("sh")
+	if err != nil || total != 4 {
+		t.Fatalf("试运行: %v %d %+v", err, total, items)
+	}
+	got := map[string]string{}
+	for _, it := range items {
+		got[it.SrcPath] = it.Category + " " + it.Action + " " + it.TargetPath
+	}
+	want := map[string]string{
+		"A/B/C/Show.S01E01.mkv":     "kept copy A/B/C/Show.S01E01.mkv",
+		"A/B/C/Show.S01E01.chs.srt": "kept copy A/B/C/Show.S01E01.chs.srt",
+		"A/IMG_20250101_120000.jpg": "kept copy A/IMG_20250101_120000.jpg",
+		"root.mp4":                  "kept copy root.mp4",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("试运行 %s: %q，应为 %q", k, got[k], v)
+		}
+	}
+
+	e.run()
+	e.run()
+	for _, w := range []string{"A/B/C/Show.S01E01.mkv", "A/B/C/Show.S01E01.chs.srt", "A/IMG_20250101_120000.jpg", "root (1).mp4"} {
+		if !e.has(w) {
+			t.Errorf("缺少 %s；库内: %v", w, e.libFiles())
+		}
+	}
+	if n := len(e.libFiles()); n != 5 {
+		t.Fatalf("库内文件数 %d: %v", n, e.libFiles())
+	}
+	for _, it := range e.items() {
+		if it.State != StateDone || it.Category != CatKept {
+			t.Errorf("%s: %s %s", it.SrcPath, it.State, it.Category)
+		}
+	}
+}
+
+// 关闭“保持源文件夹结构”时，嵌套目录中的文件照旧按类型/剧名归类。
+func TestKeepStructureOffClassifies(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	e.write("A/B/C/Show.S01E01.mkv", data(3000, 1), time.Time{})
+	e.run()
+	e.run()
+	if got := e.libFiles(); len(got) != 1 || got[0] != "剧集/Show/第1季/Show.S01E01.mkv" {
+		t.Fatalf("库内: %v", got)
+	}
+}
+
+// 相对路径各段须通过 fsx 词法校验，否则不整理。
+func TestKeepPlanValidates(t *testing.T) {
+	if p, ok := keepPlan("A/B/x.mp4"); !ok || p.Target() != "A/B/x.mp4" || p.Category != CatKept {
+		t.Fatalf("%+v %v", p, ok)
+	}
+	if p, ok := keepPlan("x.mp4"); !ok || p.Target() != "x.mp4" {
+		t.Fatalf("%+v %v", p, ok)
+	}
+	for _, bad := range []string{"../x.mp4", "A/CON/x.mp4", "A/b./x.mp4", "A//x.mp4", "/x.mp4", "A/a:b/x.mp4"} {
+		if _, ok := keepPlan(bad); ok {
+			t.Errorf("%q 应拒绝", bad)
+		}
+	}
+}
+
+// 保持结构的源可能在片库任意目录留下临时文件：启动时清理整个库目录。
+func TestStartupCleansKeepStructure(t *testing.T) {
+	e := newEnv(t, func(o *config.Organize) { o.Sources[0].KeepStructure = true }, nil)
+	os.MkdirAll(filepath.Join(e.lib, "A", "B"), 0o755)
+	tmps := []string{filepath.Join(e.lib, tempPrefix+"r"), filepath.Join(e.lib, "A", "B", tempPrefix+"x")}
+	for _, p := range tmps {
+		os.WriteFile(p, []byte("x"), 0o644)
+	}
+	e.m.Startup()
+	for _, p := range tmps {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("残留临时文件应清理: %s", p)
+		}
+	}
+}
