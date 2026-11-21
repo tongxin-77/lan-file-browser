@@ -112,6 +112,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _load() async {
     _loadContinue();
     try {
+      if (!_connected) await widget.client.reconnect(); // 断线后先轮询全部已知地址
       final shares = await widget.client.shares();
       if (!mounted) return;
       setState(() {
@@ -209,7 +210,7 @@ class _HomePageState extends State<HomePage> {
                           const SizedBox(width: 8),
                           Text(
                             _connected
-                                ? '已连接 · ${widget.server.lastIp}'
+                                ? '已连接 · ${widget.client.host}'
                                 : '连接中断，下拉重试',
                             style: const TextStyle(color: NightColors.ash),
                           ),

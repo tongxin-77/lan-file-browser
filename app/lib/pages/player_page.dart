@@ -480,7 +480,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Future<void> _attemptResume() async {
     _attempting = true;
     try {
-      await widget.client.verify(timeout: const Duration(seconds: 3));
+      // 轮询全部已保存地址，电脑换到其他已知 IP 也能续播（01 §6）
+      await widget.client.reconnect();
       await _open(_resumeAt); // 用新 URL 从断点打开，避免先从 0 播放再跳
       _attempting = false;
     } on LfbException catch (e) {

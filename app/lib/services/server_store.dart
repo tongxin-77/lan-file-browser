@@ -34,16 +34,47 @@ class ServerStore {
     if (id == null) return null;
     final s = (await servers()).where((s) => s.serverId == id).firstOrNull;
     if (s == null) return null;
-    final token = await _secure.read(key: _tokenKey(id));
+    final token = await _token(id);
     return token == null ? null : (s, token);
   }
 
+  /// 全部有 token 的已保存服务器（连接页“已保存的电脑”）。
+  Future<List<(SavedServer, String)>> paired() async => [
+    for (final s in await servers())
+      if (await _token(s.serverId) case final t?) (s, t),
+  ];
+
+  /// 设为上次使用（切换电脑，不删除其他已保存的）。
+  Future<void> setLast(String serverId) async =>
+      (await SharedPreferences.getInstance()).setString(_kLast, serverId);
+
+  /// 读取失败（如 Keystore 异常）按无 token 处理，不抛出。
+  Future<String?> _token(String serverId) async {
+    try {
+      return await _secure.read(key: _tokenKey(serverId));
+    } on Object {
+      return null;
+    }
+  }
+
   /// 保存/更新服务器并设为上次使用；[token] 非空时一并写入。
+  /// 同一 serverId 已有记录时合并已知地址。
   Future<void> save(SavedServer server, {String? token}) async {
     final prefs = await SharedPreferences.getInstance();
+    final old = (await servers()).where((s) => s.serverId == server.serverId);
+    final merged = SavedServer(
+      serverId: server.serverId,
+      name: server.name,
+      lastIp: server.lastIp,
+      port: server.port,
+      ips: {
+        ...server.ips,
+        for (final o in old) ...o.candidates,
+      }.where((ip) => ip != server.lastIp).toList(),
+    );
     final list = (await servers())
       ..removeWhere((s) => s.serverId == server.serverId)
-      ..add(server);
+      ..add(merged);
     await prefs.setString(
       _kServers,
       jsonEncode(list.map((s) => s.toJson()).toList()),

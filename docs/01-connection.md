@@ -152,7 +152,7 @@ POST /api/pair
 | 普通 API 请求 | `Authorization: Bearer <token>` |
 | 视频/图片 URL（部分播放器不便加 header） | 查询参数 `?t=<token>`，仅限 `GET /api/file`、`GET /api/download`、`GET /api/thumb`、`GET /api/app/apk/{abi}`；其他接口只认 `Authorization` 头 |
 
-- 服务端对 token 做哈希后查表；无效返回 401，App 清除该服务器 token 并引导重新配对。
+- 服务端对 token 做哈希后查表；无效返回 401（`UNAUTHORIZED`），`/api/ping` 带 token 时 `needPair=true`。App **只在这两种明确的“token 无效”**（且 ping 的 `id` 与保存的 `serverId` 一致）时清除该服务器 token，回连接页提示“这台电脑（<电脑名>）已将本机移除，请重新配对”；超时、不可达、VPN、电脑关机、5xx、id 不符等其他失败一律保留凭据（见第 6 节）。
 - App 用 `flutter_secure_storage` 保存 token（Android Keystore）。
 - 注意：`?t=` 会出现在 URL 中，服务端日志需脱敏该参数。
 
@@ -189,20 +189,26 @@ App 本地保存已配对服务器列表：
 | `serverId` | 识别“同一台电脑”的唯一依据（服务端首次启动生成的 UUID，持久化在配置中） |
 | `name` | 显示名 |
 | `lastIp` / `port` | 上次成功连接的地址 |
-| `token` | 存于 secure storage |
+| `ips` | 其他已知地址：扫码时二维码里的全部 `ips`、以前成功过的地址；同一 serverId 再次保存时合并 |
+| `token` | 存于 secure storage（读取异常按无 token 处理，不抛出） |
+
+连接信息一经保存就一直有效，除非电脑端删除该设备（第 3.3 节）。"切换或添加电脑"只改“上次使用”，不删除已保存的电脑；连接页列出全部已保存的电脑，点即用已保存凭据连接。
 
 ```mermaid
 flowchart TD
-    A[App 启动] --> B[ping 上次 IP:端口]
-    B -- 成功且 id 匹配 --> OK[连接成功]
-    B -- 失败 / id 不符 --> C[UDP 广播按 serverId 查找]
-    C -- 找到新 IP --> D[ping 新 IP] -- 成功 --> E[更新 lastIp] --> OK
-    C -- 超时未找到 --> F[提示: 确认电脑已开机且同一网络, 或重新扫码]
-    D -- 失败 --> F
+    A[App 启动] --> B[正在连接 电脑名: 并发 ping lastIp + ips, 带 token, 3s]
+    B -- 某地址成功且 id 匹配 --> E[该地址设为 lastIp 并保存] --> OK[进入首页]
+    B -- id 匹配且 needPair=true / 401 --> X[清该电脑 token, 回连接页: 已将本机移除]
+    B -- 其他失败 --> F[保留凭据, 显示连不上原因 + 重试 / 修改地址 / 切换或添加电脑]
+    F -- 退避 2/4/8/16/30s 自动重试, 之后每 30s --> B
+    F -- 修改地址 --> M[用旧 token ping 新地址] -- id 一致且 token 有效 --> E2[保存新地址, 旧地址保留为候选] --> OK
+    M -- id 不符 --> F
 ```
 
-- ping 返回的 `id` 与保存的 `serverId` 不符时，视为 IP 被其他电脑占用，不发送 token。
-- 运行中断线（如视频播放中）：指数退避重试数次后再走上述流程。
+- ping 返回的 `id` 与保存的 `serverId` 不符时，视为该地址被其他电脑占用：跳过该地址，不算授权失效。
+- 电脑换了 IP 且新 IP 不在已知地址中：在“正在连接”页点“修改地址”输入新 IP:端口，无需重新配对。
+- 运行中断线：播放器按退避重试（05 §4.3），每次重试、首页下拉刷新都会并发轮询全部已知地址，换到可用地址后保存为 `lastIp`。
+- UDP 广播按 serverId 查找新 IP 尚未实现（自动发现完成后接入上述流程）。
 
 ## 7. Windows 防火墙与网络排错
 
@@ -235,7 +241,7 @@ netsh advfirewall firewall add rule name="LAN File Browser UDP" dir=in action=al
 | 绕过 VPN | App 启动时（`MainActivity`）用 `registerNetworkCallback` 跟踪底层 Wi-Fi（`TRANSPORT_WIFI`，默认请求带 `NOT_VPN`，不匹配 VPN 网络）：可用时 `bindProcessToNetwork(wifi)`，整个进程（Dart `HttpClient`、libmpv 原生 socket）的连接都走 Wi-Fi；该 Wi-Fi 丢失时 `bindProcessToNetwork(null)` 解绑。需 `ACCESS_NETWORK_STATE` |
 | 局限 | 仅当 VPN 允许绕过（`VpnService.Builder.allowBypass()`）时有效；不允许时绑定失败或连接仍被 VPN 接管，异常一律忽略、不影响 App。绑定后 App 访问外网（如检查更新）也走 Wi-Fi 而非 VPN |
 | 检测与提示 | MethodChannel `isVpnActive()`：任一网络带 `TRANSPORT_VPN` 即为真。以下网络类错误（`NetworkException`，服务端已响应的错误除外）在为真时另起一行追加：“手机开着 VPN，可能拦截了局域网连接。请在 VPN 里打开‘绕过局域网/私有网络’，或在分应用代理中排除 LAN File Browser。” |
-| 提示位置 | 连接页扫码 / 手动配对失败、超时、“二维码里的地址都连不上”；启动时验证上次服务器失败；播放断线重连全部失败 |
+| 提示位置 | 连接页扫码 / 手动配对失败、超时、“二维码里的地址都连不上”；启动时“正在连接”页连不上已保存的电脑；播放断线重连全部失败 |
 
 ## 8. 已确认决策
 

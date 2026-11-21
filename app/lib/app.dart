@@ -45,13 +45,16 @@ class LfbApp extends StatelessWidget {
   }
 }
 
-/// 已配对服务器的客户端：任何带 token 的请求 401 → 清 token 回连接页（01 §3.3）。
+/// 已配对服务器的客户端：任何带 token 的请求 401 → 清 token 回连接页（01 §3.3）；
+/// 断线重连会尝试全部已知地址，换地址后保存（01 §6）。
 LfbClient clientFor(SavedServer server, String token) => LfbClient(
   host: server.lastIp,
   port: server.port,
   token: token,
   serverId: server.serverId,
+  fallbackHosts: server.ips,
   onUnauthorized: () => _signOut(server),
+  onHostChanged: (ip) => serverStore.save(server.withAddress(ip)),
 );
 
 bool _signingOut = false;
@@ -61,7 +64,7 @@ Future<void> _signOut(SavedServer server) async {
   _signingOut = true;
   try {
     await serverStore.clearToken(server.serverId);
-    showConnectPage(message: '「${server.name}」的授权已失效，请重新配对');
+    showConnectPage(message: '这台电脑（${server.name}）已将本机移除，请重新配对');
   } finally {
     _signingOut = false;
   }
@@ -79,12 +82,10 @@ void openHome(SavedServer server, String token) {
   updateChecker.start(client); // 连接成功后检查更新与电脑端版本（02 §5）
 }
 
-void showConnectPage({String? message, bool canRetry = false}) {
+void showConnectPage({String? message}) {
   vaultController.lock();
   navigatorKey.currentState?.pushAndRemoveUntil(
-    MaterialPageRoute<void>(
-      builder: (_) => ConnectPage(message: message, canRetry: canRetry),
-    ),
+    MaterialPageRoute<void>(builder: (_) => ConnectPage(message: message)),
     (_) => false,
   );
 }
