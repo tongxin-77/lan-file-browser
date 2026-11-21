@@ -43,6 +43,7 @@ type Config struct {
 	Shares           []Share          `json:"shares"`
 	OrganizeDefaults OrganizeDefaults `json:"organizeDefaults"` // 自动整理全局默认值（06）
 	Update           UpdateSettings   `json:"update"`           // 检查更新（02 §5）
+	Discovery        Discovery        `json:"discovery"`        // 局域网自动发现（01 §2.2）
 
 	dir string
 }
@@ -58,7 +59,8 @@ func DefaultDir() (string, error) {
 
 // Load 读取 dir 下的配置；不存在时生成默认配置并保存。缺失的字段补默认值。
 func Load(dir string) (*Config, error) {
-	c := &Config{dir: dir, OrganizeDefaults: DefaultOrganizeDefaults(), Update: UpdateSettings{Enabled: true}} // JSON 中缺失的键保留默认值
+	c := &Config{dir: dir, OrganizeDefaults: DefaultOrganizeDefaults(), Update: UpdateSettings{Enabled: true},
+		Discovery: Discovery{Enabled: true}} // JSON 中缺失的键保留默认值
 	data, err := os.ReadFile(filepath.Join(dir, fileName))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

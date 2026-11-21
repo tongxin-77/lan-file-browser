@@ -24,6 +24,7 @@ import (
 	"lfb/server/internal/api"
 	"lfb/server/internal/auth"
 	"lfb/server/internal/config"
+	"lfb/server/internal/discovery"
 	"lfb/server/internal/organize"
 	"lfb/server/internal/store"
 	"lfb/server/internal/thumb"
@@ -119,6 +120,9 @@ func run(dataDir string, port int, updateAPI string, browser bool) error {
 		openBrowser(adminURL) // 已在监听，浏览器打开时页面可用
 	}
 	go printPairingLoop(ctx, cfg, svc.Codes, port)
+	if cfg.Discovery.Enabled {
+		startDiscovery(ctx, cfgStore, port)
+	}
 
 	select {
 	case err := <-errc:
@@ -167,6 +171,19 @@ func shutdown(hs *http.Server, timeout time.Duration) {
 		log.Printf("优雅关闭未完成（%v），强制关闭连接", err)
 		hs.Close()
 	}
+}
+
+// startDiscovery 监听 UDP 8687 应答自动发现；端口被占用等失败只记日志，不影响 HTTP 服务。
+func startDiscovery(ctx context.Context, cfgStore *config.Store, port int) {
+	conn, err := net.ListenPacket("udp4", fmt.Sprintf(":%d", discovery.Port))
+	if err != nil {
+		log.Printf("自动发现未启动（UDP %d）: %v", discovery.Port, err)
+		return
+	}
+	go discovery.Serve(ctx, conn, func() discovery.Info {
+		c := cfgStore.Get()
+		return discovery.Info{ID: c.ServerID, Name: c.Name, Version: version, Port: port, IPs: api.LocalIPv4s()}
+	})
 }
 
 // printPairingLoop 打印连接信息，并在 PIN/一次性码刷新（过期或被使用）后重新打印。
