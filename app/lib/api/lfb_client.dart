@@ -24,10 +24,19 @@ class LfbClient {
     http.Client? httpClient,
     this.onUnauthorized,
     this.timeout = const Duration(seconds: 10),
+    this.fallbackHosts = const [],
+    this.onHostChanged,
   }) : _http = httpClient ?? http.Client();
 
-  final String host;
+  /// 当前使用的地址；[reconnect] 成功换到其他已知地址时改变。
+  String host;
   final int port;
+
+  /// 除 [host] 外的已知地址（01 §6），[reconnect] 时一并尝试。
+  final List<String> fallbackHosts;
+
+  /// [reconnect] 换了地址后回调（用于保存新的 lastIp）。
+  final void Function(String host)? onHostChanged;
   final String? token;
 
   /// 已配对服务器的 id；重连时 ping 结果需与之匹配（01 §6）。
@@ -67,6 +76,51 @@ class LfbClient {
     if (token != null && p.needPair) {
       onUnauthorized?.call();
       throw const ApiException(401, 'UNAUTHORIZED', '授权已失效，请重新配对');
+    }
+    return p;
+  }
+
+  /// 断线重连：并发 [verify] [host] 与 [fallbackHosts]，第一个成功的地址设为 [host]。
+  /// 只有 id 匹配的电脑明确表示 token 无效时才触发 [onUnauthorized] 并抛 401；
+  /// 其余失败（超时、不可达、id 不符、5xx）一律抛 [NetworkException]。
+  Future<PingInfo> reconnect({
+    Duration timeout = const Duration(seconds: 3),
+  }) async {
+    final hosts = {host, ...fallbackHosts}.toList();
+    final done = Completer<(String, PingInfo)?>();
+    var pending = hosts.length;
+    var unauthorized = false;
+    for (final h in hosts) {
+      LfbClient(
+            host: h,
+            port: port,
+            token: token,
+            serverId: serverId,
+            httpClient: _http,
+          )
+          .verify(timeout: timeout)
+          .then((p) {
+            if (!done.isCompleted) done.complete((h, p));
+          })
+          .catchError((Object e) {
+            if (e is ApiException && e.isUnauthorized) unauthorized = true;
+          })
+          .whenComplete(() {
+            if (--pending == 0 && !done.isCompleted) done.complete(null);
+          });
+    }
+    final ok = await done.future;
+    if (ok == null) {
+      if (unauthorized) {
+        onUnauthorized?.call();
+        throw const ApiException(401, 'UNAUTHORIZED', '授权已失效，请重新配对');
+      }
+      throw const NetworkException();
+    }
+    final (h, p) = ok;
+    if (h != host) {
+      host = h;
+      onHostChanged?.call(h);
     }
     return p;
   }

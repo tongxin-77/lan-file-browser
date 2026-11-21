@@ -15,13 +15,10 @@ import 'startup_page.dart';
 
 /// 连接页：扫码（首选）或手动输入 IP:端口 + 6 位 PIN（01 §2.1、2.3）。
 class ConnectPage extends StatefulWidget {
-  const ConnectPage({super.key, this.message, this.canRetry = false});
+  const ConnectPage({super.key, this.message});
 
-  /// 进入本页的原因（断线、授权失效等）。
+  /// 进入本页的原因（如电脑已将本机移除）。
   final String? message;
-
-  /// 显示「重试上次连接」。
-  final bool canRetry;
 
   @override
   State<ConnectPage> createState() => _ConnectPageState();
@@ -32,6 +29,25 @@ class _ConnectPageState extends State<ConnectPage> {
   final _pin = TextEditingController();
   bool _busy = false;
   String? _error;
+
+  /// 已保存的电脑：点即用已保存凭据连接，无需重新配对。
+  List<SavedServer> _saved = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    serverStore.paired().then((list) {
+      if (mounted) setState(() => _saved = [for (final (s, _) in list) s]);
+    });
+  }
+
+  Future<void> _useSaved(SavedServer s) async {
+    await serverStore.setLast(s.serverId);
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(builder: (_) => const StartupPage()),
+    );
+  }
 
   @override
   void dispose() {
@@ -56,7 +72,7 @@ class _ConnectPageState extends State<ConnectPage> {
           '二维码里的地址都连不上。请确认手机与电脑在同一网络、防火墙已放行，或手动输入电脑 IP',
         );
       }
-      await _pair(ip, c.port, c.code);
+      await _pair(ip, c.port, c.code, ips: c.ips);
     });
   }
 
@@ -77,7 +93,12 @@ class _ConnectPageState extends State<ConnectPage> {
     });
   }
 
-  Future<void> _pair(String host, int port, String code) async {
+  Future<void> _pair(
+    String host,
+    int port,
+    String code, {
+    List<String> ips = const [],
+  }) async {
     final result = await LfbClient(host: host, port: port).pair(
       code: code,
       deviceName: await PlatformService.deviceName(),
@@ -88,6 +109,7 @@ class _ConnectPageState extends State<ConnectPage> {
       name: result.name,
       lastIp: host,
       port: port,
+      ips: ips,
     );
     await serverStore.save(server, token: result.token);
     openHome(server, result.token);
@@ -137,19 +159,24 @@ class _ConnectPageState extends State<ConnectPage> {
                   if (widget.message != null) ...[
                     const SizedBox(height: 20),
                     Text(widget.message!, style: const TextStyle(height: 1.5)),
-                    if (widget.canRetry)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton(
-                          onPressed: _busy
-                              ? null
-                              : () => Navigator.of(context).pushReplacement(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => const StartupPage(),
-                                  ),
-                                ),
-                          child: const Text('重试上次连接'),
+                  ],
+                  if (_saved.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    const Text(
+                      '已保存的电脑',
+                      style: TextStyle(color: NightColors.ash),
+                    ),
+                    for (final s in _saved)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.computer_outlined),
+                        title: Text(s.name),
+                        subtitle: Text(
+                          '${s.lastIp}:${s.port}',
+                          style: const TextStyle(color: NightColors.ash),
                         ),
+                        enabled: !_busy,
+                        onTap: () => _useSaved(s),
                       ),
                   ],
                   if (_error != null) ...[

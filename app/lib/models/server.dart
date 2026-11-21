@@ -51,6 +51,7 @@ class SavedServer {
     required this.name,
     required this.lastIp,
     required this.port,
+    this.ips = const [],
   });
 
   factory SavedServer.fromJson(Map<String, dynamic> j) => SavedServer(
@@ -58,6 +59,7 @@ class SavedServer {
     name: j['name'] as String? ?? '',
     lastIp: j['lastIp'] as String,
     port: j['port'] as int,
+    ips: (j['ips'] as List?)?.cast<String>() ?? const [],
   );
 
   final String serverId;
@@ -65,10 +67,26 @@ class SavedServer {
   final String lastIp;
   final int port;
 
+  /// 其他已知地址（二维码里的全部候选 IP 等），重连时与 [lastIp] 一起尝试。
+  final List<String> ips;
+
+  /// 重连候选：上次成功地址在前，去重。
+  List<String> get candidates => {lastIp, ...ips}.toList();
+
+  /// 换到 [ip]（可同时改端口）后的记录；旧地址保留为候选。
+  SavedServer withAddress(String ip, [int? port]) => SavedServer(
+    serverId: serverId,
+    name: name,
+    lastIp: ip,
+    port: port ?? this.port,
+    ips: candidates,
+  );
+
   Map<String, dynamic> toJson() => {
     'serverId': serverId,
     'name': name,
     'lastIp': lastIp,
     'port': port,
+    'ips': ips,
   };
 }
