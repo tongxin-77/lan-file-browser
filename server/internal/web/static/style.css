@@ -289,6 +289,7 @@ dialog::backdrop{background:rgba(26,17,22,.75)}
 .org-dry .mono,.org-rec .mono{font-family:var(--path);color:var(--beam);font-weight:400}
 .org-dry .act-waiting,.org-dry .act-locked{color:var(--dim)}
 .org-dry .act-duplicate,.org-dry .act-done{color:var(--dim);text-decoration:line-through}
+.org-rec summary{cursor:pointer;margin:16px 0 8px;font:700 14px var(--cn);color:var(--dim)}
 .org-rec ul{list-style:none;margin:0;padding:0}
 .org-rec li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
 .org-rec li span{overflow-wrap:anywhere}

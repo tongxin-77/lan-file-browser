@@ -11,6 +11,7 @@
   var data = null;    // GET /organize 的响应
   var dry = null;     // 试运行结果
   var records = null; // 失败与最近记录
+  var recentOpen = false; // “最近整理”默认收起，重绘时保持用户的展开状态
   var picking = null; // 文件夹选择器 {path, parent, items}
   var pollTimer = null;
 
@@ -195,11 +196,11 @@
         }).join("") + "</ul></div>";
     }
     if (r.length) {
-      out += '<div class="org-rec"><h5>最近整理</h5><ul>' + r.map(function (it) {
+      out += '<details class="org-rec" data-org-recent' + (recentOpen ? " open" : "") + '><summary>最近整理（' + r.length + '）</summary><ul>' + r.map(function (it) {
         return "<li><span>" + esc(it.srcPath) + ' <i>→</i> <b class="mono">' + esc(it.targetPath || "—") + "</b></span><small>" +
           when(it.updatedAt) + " · " + esc({ done: "已整理", duplicate: "重复", queued: "排队", copying: "复制中", failed: "失败" }[it.state] || it.state) +
           "</small>" + '<button class="btn ghost org-mini" data-org-redo="' + it.id + '" title="删除这条记录，下次扫描按新文件处理">重新整理</button></li>';
-      }).join("") + "</ul></div>";
+      }).join("") + "</ul></details>";
     }
     return out;
   }
@@ -298,6 +299,10 @@
         break;
     }
   });
+  panel.addEventListener("toggle", function (e) {
+    if (e.target.hasAttribute && e.target.hasAttribute("data-org-recent")) recentOpen = e.target.open;
+  }, true);
+
   panel.addEventListener("change", function (e) {
     var t = e.target;
     if (t.dataset.orgMode) {
