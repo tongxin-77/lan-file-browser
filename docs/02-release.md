@@ -93,6 +93,7 @@ APK 签名：
 | 下载与安装 | 下载 APK → 校验 sha256 → 调用系统安装器（`open_filex` 或 `ota_update` 包） |
 | Android 配置 | `REQUEST_INSTALL_PACKAGES` 权限；`FileProvider` 暴露下载目录；首次需用户授予“安装未知应用” |
 | 提示方式 | 普通新版本：可关闭的对话框；低于 `minAppVersion`：强提示（不可跳过） |
+| 手动检查 | 首页右上角“设置”面板显示当前 App 版本，“检查更新”立即请求 `/api/app/latest`：有新版弹更新框；已是最新、服务端暂无版本信息（404）、连接失败都在面板内显示结果 |
 
 ### 5.3 版本兼容
 

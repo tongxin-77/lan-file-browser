@@ -4,7 +4,9 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../api/api_exception.dart';
 import '../api/lfb_client.dart';
+import '../models/server.dart';
 import '../widgets/update_dialog.dart';
 import 'app_update.dart';
 
@@ -54,21 +56,49 @@ class UpdateChecker {
         await showServerUpgradeDialog(ctx, ping.version);
       }
     }
+    await _offer(client, ping, await client.appLatest(), manual: false);
+  }
+
+  /// 设置里的“检查更新”（02 §5.2）：有新版直接弹更新框（返回 null），
+  /// 否则返回给用户看的结果；忽略“稍后”记录与 24 小时间隔。
+  Future<String?> checkNow(LfbClient client) async {
+    try {
+      final ping = await client.ping();
+      final latest = await client.appLatest();
+      if (await _offer(client, ping, latest, manual: true)) return null;
+      if (latest == null) {
+        return '电脑端暂时没有可用的 App 版本信息'
+            '（电脑端尚未从 GitHub 取到正式版 Release，或其检查更新失败 / 已关闭）';
+      }
+      return '已是最新版本';
+    } on LfbException catch (e) {
+      return '检查失败：${e.message}';
+    } on Object catch (e) {
+      return '检查失败：$e';
+    }
+  }
+
+  /// 需要更新时弹更新框并返回 true；无需更新返回 false。
+  Future<bool> _offer(
+    LfbClient client,
+    PingInfo ping,
+    AppRelease? latest, {
+    required bool manual,
+  }) async {
     final current = (await PackageInfo.fromPlatform()).version;
-    final latest = await client.appLatest();
     final decision = decideUpdate(
       current: current,
       latest: latest?.version,
       minAppVersion: ping.minAppVersion,
     );
-    if (decision == UpdateDecision.none) return;
+    if (decision == UpdateDecision.none) return false;
     final forced = decision == UpdateDecision.forced;
-    if (!forced && latest?.version == _skipped) return;
+    if (!manual && !forced && latest?.version == _skipped) return false;
 
     final abis = (await DeviceInfoPlugin().androidInfo).supportedAbis;
     final abi = latest == null ? null : chooseAbi(abis, latest.apks);
     final ctx = _context();
-    if (ctx == null || !ctx.mounted) return;
+    if (ctx == null || !ctx.mounted) return false;
     final offer = UpdateOffer(
       version: latest?.version,
       notes: latest?.notes ?? '',
@@ -83,5 +113,6 @@ class UpdateChecker {
     if (!installing && !forced) _skipped = latest?.version;
     // 强制更新框被关掉（如上锁回首页时）→ 下个整点再弹
     if (!installing && forced) _lastCheck = null;
+    return true;
   }
 }

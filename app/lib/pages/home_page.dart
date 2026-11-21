@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../api/api_exception.dart';
 import '../api/lfb_client.dart';
@@ -12,6 +13,7 @@ import '../theme.dart';
 import '../widgets/continue_tile.dart';
 import '../widgets/lamp_glow.dart';
 import '../widgets/password_sheet.dart';
+import '../widgets/settings_sheet.dart';
 import '../widgets/thumb.dart';
 import 'browser_page.dart';
 import 'player_page.dart';
@@ -101,6 +103,12 @@ class _HomePageState extends State<HomePage> {
     (pw) => vaultController.unlock(widget.client, pw),
   );
 
+  void _openSettings() => showSettingsSheet(
+    context,
+    version: PackageInfo.fromPlatform().then((i) => i.version),
+    onCheck: () => updateChecker.checkNow(widget.client),
+  );
+
   Future<void> _load() async {
     _loadContinue();
     try {
@@ -150,23 +158,40 @@ class _HomePageState extends State<HomePage> {
                   padding: const EdgeInsets.fromLTRB(8, 40, 8, 16),
                   children: [
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: RawGestureDetector(
-                        gestures: {
-                          LongPressGestureRecognizer:
-                              GestureRecognizerFactoryWithHandlers<
-                                LongPressGestureRecognizer
-                              >(
-                                () => LongPressGestureRecognizer(
-                                  duration: const Duration(milliseconds: 600),
+                      padding: const EdgeInsets.only(left: 16, right: 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: RawGestureDetector(
+                                gestures: {
+                                  LongPressGestureRecognizer:
+                                      GestureRecognizerFactoryWithHandlers<
+                                        LongPressGestureRecognizer
+                                      >(
+                                        () => LongPressGestureRecognizer(
+                                          duration: const Duration(
+                                            milliseconds: 600,
+                                          ),
+                                        ),
+                                        (r) => r.onLongPress = _askPassword,
+                                      ),
+                                },
+                                child: Text(
+                                  widget.server.name,
+                                  style: text.headlineMedium,
                                 ),
-                                (r) => r.onLongPress = _askPassword,
                               ),
-                        },
-                        child: Text(
-                          widget.server.name,
-                          style: text.headlineMedium,
-                        ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: '设置',
+                            color: NightColors.ash,
+                            icon: const Icon(Icons.settings_outlined),
+                            onPressed: _openSettings,
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 8),
