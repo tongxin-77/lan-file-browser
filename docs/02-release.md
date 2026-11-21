@@ -74,7 +74,8 @@ APK 签名：
 | 项 | 设计 |
 | ---- | ---- |
 | 检查时机 | 启动时 + 每 24h |
-| 检查地址 | `GET https://api.github.com/repos/<owner>/<repo>/releases/latest`，取 `tag_name` 与本地 `main.version` 比较（semver） |
+| 检查地址 | 当前为正式版：`GET https://api.github.com/repos/<owner>/<repo>/releases/latest`（GitHub 不返回预发布）；当前为预发布版（semver 带 `-` 后缀，如 `0.1.0-beta.1`）：`GET …/releases?per_page=20`，忽略草稿，在预发布与正式版中取 semver 最大者。所选 Release 的 `tag_name` 与本地 `main.version` 按 semver 比较（`0.1.0-beta.10 > 0.1.0-beta.9`，`0.1.0 > 0.1.0-beta.9`） |
+| 更新通道 | 由服务端自身版本决定：正式版只看正式版；预发布版同时看预发布与正式版。管理页横幅、APK 缓存、`/api/app/latest`、`/api/app/apk/{abi}`、`update.mirror` 均基于选出的这一个 Release |
 | 提示位置 | 本机管理网页 `http://localhost:8686/` 顶部横幅：新版本号、changelog（折叠）、“下载安装包”（新标签页打开）、“稍后提醒”（同一版本隐藏 1 天）；“当前版本”旁有“检查更新” |
 | 接口（仅本机） | `GET /api/admin/update` → `{current, latest, hasUpdate, notes, installerUrl, releaseUrl, checkedAt, failed, disabled}`（`disabled`：`dev` 开发版 / `config` 已关闭）；`POST /api/admin/update/check` 立即检查（CSRF 同其他修改类接口） |
 | 资产识别 | 安装包 `lfb-server-setup-*.exe`；APK `lfb-app-<abi>.apk`；`checksums.txt`（sha256sum 格式） |

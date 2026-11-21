@@ -153,7 +153,7 @@ func (c *Checker) CacheAPKsAsync() {
 // Wait 等待后台检查与下载结束（测试用）。
 func (c *Checker) Wait() { c.bg.Wait() }
 
-// Check 立即请求 GitHub 最新 Release。失败只记日志并返回错误，保留上次结果。
+// Check 立即请求 GitHub 最新 Release（预发布规则见 latestRelease）。失败只记日志并返回错误，保留上次结果。
 // 开发版或已关闭时不发请求，返回 nil。
 func (c *Checker) Check(ctx context.Context) error {
 	if c.disabled() != "" {
@@ -174,22 +174,58 @@ func (c *Checker) Check(ctx context.Context) error {
 	return nil
 }
 
+type ghRelease struct {
+	TagName string `json:"tag_name"`
+	Draft   bool   `json:"draft"`
+	Body    string `json:"body"`
+	HTMLURL string `json:"html_url"`
+	Assets  []struct {
+		Name string `json:"name"`
+		URL  string `json:"browser_download_url"`
+	} `json:"assets"`
+}
+
+// latestRelease 选出要提示的 Release：当前为正式版时取 releases/latest（GitHub 跳过预发布）；
+// 当前为预发布版时从最近的 Release 列表中（忽略草稿）取 semver 最大者，预发布与正式版都参与。
+func (c *Checker) latestRelease(ctx context.Context) (ghRelease, error) {
+	var gh ghRelease
+	if cur, _ := parseVersion(c.opt.Current); len(cur.pre) == 0 {
+		body, err := c.get(ctx, c.opt.APIBase+"/repos/"+repo+"/releases/latest", maxAPIBody)
+		if err != nil {
+			return gh, err
+		}
+		if err := json.Unmarshal(body, &gh); err != nil {
+			return gh, fmt.Errorf("解析 Release: %w", err)
+		}
+		return gh, nil
+	}
+	body, err := c.get(ctx, c.opt.APIBase+"/repos/"+repo+"/releases?per_page=20", maxAPIBody)
+	if err != nil {
+		return gh, err
+	}
+	var list []ghRelease
+	if err := json.Unmarshal(body, &list); err != nil {
+		return gh, fmt.Errorf("解析 Release 列表: %w", err)
+	}
+	found := false
+	for _, r := range list {
+		if _, err := parseVersion(r.TagName); r.Draft || err != nil {
+			continue
+		}
+		if n, _ := Compare(r.TagName, gh.TagName); !found || n > 0 {
+			gh, found = r, true
+		}
+	}
+	if !found {
+		return gh, errors.New("没有可用的 Release")
+	}
+	return gh, nil
+}
+
 func (c *Checker) fetch(ctx context.Context, mirror string) (*Release, error) {
-	body, err := c.get(ctx, c.opt.APIBase+"/repos/"+repo+"/releases/latest", maxAPIBody)
+	gh, err := c.latestRelease(ctx)
 	if err != nil {
 		return nil, err
-	}
-	var gh struct {
-		TagName string `json:"tag_name"`
-		Body    string `json:"body"`
-		HTMLURL string `json:"html_url"`
-		Assets  []struct {
-			Name string `json:"name"`
-			URL  string `json:"browser_download_url"`
-		} `json:"assets"`
-	}
-	if err := json.Unmarshal(body, &gh); err != nil {
-		return nil, fmt.Errorf("解析 Release: %w", err)
 	}
 	ver, err := normalize(gh.TagName)
 	if err != nil {
