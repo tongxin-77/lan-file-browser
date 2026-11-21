@@ -48,6 +48,7 @@ void main() {
   for (final (name, size) in [('竖屏', portrait), ('横屏', landscape)]) {
     testWidgets('播放器底部控制栏$name不溢出', (tester) async {
       useSize(tester, size);
+      var rateTaps = 0;
       await tester.pumpWidget(
         app(
           Scaffold(
@@ -59,7 +60,9 @@ void main() {
                 value: 3600,
                 max: 7200,
                 duration: const Duration(hours: 2),
+                rate: 0.75, // 最长的倍速文字
                 onPlayPause: () {},
+                onRate: () => rateTaps++,
                 onDrag: (_) {},
                 onDragEnd: (_) {},
                 onEpisodes: () {},
@@ -80,6 +83,15 @@ void main() {
         size == portrait ? findsNothing : findsOneWidget,
       );
       expect(find.byType(Slider), findsOneWidget);
+      // 倍速按钮：竖屏只显示倍速值，横屏带“倍速”
+      expect(
+        find.text(size == portrait ? '0.75×' : '倍速 0.75×'),
+        findsOneWidget,
+      );
+      await tester.tap(find.textContaining('0.75×'));
+      expect(rateTaps, 1);
+      // 竖屏也给进度条留出可拖动的宽度
+      expect(tester.getSize(find.byType(Slider)).width, greaterThan(40));
     });
 
     testWidgets('设置面板$name不溢出', (tester) async {

@@ -104,6 +104,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   SubtitleTrack? _subtitleTrack; // 用户/自动选定的字幕；null = 播放器默认
   String _subtitleName = '默认';
 
+  /// 倍速：切集、续播保持；不持久化，下次打开播放器为 1.0×。
+  double _rate = 1.0;
+
   bool _drawer = false;
   List<PathItem>? _episodes;
   bool _landscape = true; // 进入即横屏，可用“旋转屏幕”切换
@@ -185,14 +188,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _loadSubtitles();
   }
 
-  Future<void> _open(Duration start) {
+  Future<void> _open(Duration start) async {
     _loaded = false;
-    return _player.open(
+    await _player.open(
       Media(
         widget.client.fileUrl(widget.shareId, _path).toString(),
         start: start > Duration.zero ? start : null,
       ),
     );
+    if (_rate != 1.0) await _player.setRate(_rate); // 切集、续播保持倍速
   }
 
   void _onPosition(Duration p) {
@@ -369,6 +373,33 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void _applySubtitle() {
     final t = _subtitleTrack;
     if (_loaded && t != null) _player.setSubtitleTrack(t);
+  }
+
+  Future<void> _showRateMenu() async {
+    _hideTimer?.cancel();
+    final rate = await showModalBottomSheet<double>(
+      context: context,
+      backgroundColor: NightColors.pillow,
+      showDragHandle: true,
+      builder: (ctx) => ListView(
+        shrinkWrap: true,
+        children: [
+          for (final r in playbackRates)
+            ListTile(
+              title: Text(formatRate(r)),
+              trailing: r == _rate
+                  ? const Icon(Icons.check, color: NightColors.wick)
+                  : null,
+              onTap: () => Navigator.of(ctx).pop(r),
+            ),
+        ],
+      ),
+    );
+    if (rate != null && mounted) {
+      setState(() => _rate = rate);
+      await _player.setRate(rate);
+    }
+    _scheduleHide();
   }
 
   Future<void> _showSubtitleMenu() async {
@@ -756,6 +787,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 value: value,
                 max: max,
                 duration: _duration,
+                rate: _rate,
+                onRate: _showRateMenu,
                 onPlayPause: () {
                   _player.playOrPause();
                   _scheduleHide();

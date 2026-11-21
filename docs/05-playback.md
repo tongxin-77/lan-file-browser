@@ -134,6 +134,7 @@ http.ServeContent(w, r, name, modTime, deadlineReader{f, rc})
 | 起播：降低 probesize / analyzeduration | 减少开播前探测读取量 | P2 |
 | 拖动：拖动中关键帧粗跳、松手精确跳 | 拖动时快速预览，松手位置准确 | P1 |
 | 预加载下一集 | 片尾预取下一集开头与字幕 | P2 |
+| 倍速 0.5–3.0× | 控制栏倍速按钮调 `Player.setRate`；切集、续播保持，退出播放器后恢复 1.0×（不持久化）。进度上报与“看完”判断都用媒体时间，不受倍速影响 | P2 |
 
 ### 4.2 libmpv 选项（核实）
 

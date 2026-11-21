@@ -151,3 +151,10 @@ String episodeLabel(String fileName) {
   }
   return stem;
 }
+
+/// 可选倍速。
+const playbackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+
+/// 倍速显示：1.0×、0.75×、2.0×。
+String formatRate(double rate) =>
+    '${rate == rate.roundToDouble() ? rate.toStringAsFixed(1) : rate}×';
