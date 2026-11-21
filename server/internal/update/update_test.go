@@ -30,6 +30,9 @@ func TestCompare(t *testing.T) {
 		{"1.2.0-alpha", "1.2.0-alpha.1", -1},
 		{"1.2.0-1", "1.2.0-beta", -1},
 		{"1.2.0+build.5", "1.2.0", 0},
+		{"0.1.0-beta.2", "0.1.0-beta.1", 1},
+		{"0.1.0", "0.1.0-beta.9", 1},
+		{"0.1.0-beta.10", "0.1.0-beta.9", 1},
 	}
 	for _, c := range cases {
 		got, err := Compare(c.a, c.b)
@@ -63,6 +66,9 @@ type fakeGitHub struct {
 	t        *testing.T
 	srv      *httptest.Server
 	tag      string
+	pre      []string // 额外的预发布 Release（/releases 列表）
+	drafts   []string // 额外的草稿 Release（/releases 列表）
+	apiPath  atomic.Value
 	status   int               // API 状态码，0 = 200
 	assets   map[string][]byte // 资产名 → 内容
 	sums     map[string]string // 覆盖 checksums.txt 中的值
@@ -86,26 +92,27 @@ func newFake(t *testing.T, tag string) *fakeGitHub {
 
 func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	f.ua.Store(r.Header.Get("User-Agent"))
-	if r.URL.Path == "/repos/tongxin-77/lan-file-browser/releases/latest" {
+	const api = "/repos/tongxin-77/lan-file-browser/releases"
+	if r.URL.Path == api+"/latest" || r.URL.Path == api {
 		f.apiHits.Add(1)
+		f.apiPath.Store(r.URL.Path)
 		if f.status != 0 {
 			w.WriteHeader(f.status)
 			fmt.Fprint(w, `{"message":"API rate limit exceeded"}`)
 			return
 		}
-		var as []string
-		names := []string{}
-		for n := range f.assets {
-			names = append(names, n)
+		if r.URL.Path == api+"/latest" {
+			fmt.Fprint(w, f.release(f.tag, false, false))
+			return
 		}
-		if !f.noSums {
-			names = append(names, "checksums.txt")
+		list := []string{f.release(f.tag, false, false)}
+		for _, tag := range f.pre {
+			list = append(list, f.release(tag, true, false))
 		}
-		for _, n := range names {
-			as = append(as, fmt.Sprintf(`{"name":%q,"browser_download_url":"https://github.com/tongxin-77/lan-file-browser/releases/download/%s/%s"}`, n, f.tag, n))
+		for _, tag := range f.drafts {
+			list = append(list, f.release(tag, false, true))
 		}
-		fmt.Fprintf(w, `{"tag_name":%q,"body":"## 更新\n- 修复","html_url":"https://github.com/tongxin-77/lan-file-browser/releases/tag/%s","assets":[%s]}`,
-			f.tag, f.tag, strings.Join(as, ","))
+		fmt.Fprintf(w, "[%s]", strings.Join(list, ","))
 		return
 	}
 	f.dlHits.Add(1)
@@ -128,6 +135,22 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write(b)
+}
+
+func (f *fakeGitHub) release(tag string, prerelease, draft bool) string {
+	var as []string
+	names := []string{}
+	for n := range f.assets {
+		names = append(names, n)
+	}
+	if !f.noSums {
+		names = append(names, "checksums.txt")
+	}
+	for _, n := range names {
+		as = append(as, fmt.Sprintf(`{"name":%q,"browser_download_url":"https://github.com/tongxin-77/lan-file-browser/releases/download/%s/%s"}`, n, tag, n))
+	}
+	return fmt.Sprintf(`{"tag_name":%q,"prerelease":%t,"draft":%t,"body":"## 更新\n- 修复","html_url":"https://github.com/tongxin-77/lan-file-browser/releases/tag/%s","assets":[%s]}`,
+		tag, prerelease, draft, tag, strings.Join(as, ","))
 }
 
 // redirect 把发往 github.com 的请求改发到伪造服务器。
@@ -349,5 +372,51 @@ func TestMirror(t *testing.T) {
 	}
 	if p, _ := e.f.lastPath.Load().(string); !strings.HasPrefix(p, "/mirror/tongxin-77/") {
 		t.Fatalf("下载路径: %s", p)
+	}
+}
+
+// 当前为预发布版：同时考虑预发布与正式版，取 semver 最大者；草稿忽略。
+func TestPrereleaseChannel(t *testing.T) {
+	e := newEnv(t, "1.2.0-beta.1", "v1.1.0")
+	e.f.pre = []string{"v1.2.0-beta.2", "v1.2.0-beta.10", "v1.2.0-beta.9"}
+	e.f.drafts = []string{"v1.3.0"}
+	if err := e.c.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := e.f.apiPath.Load().(string); p != "/repos/tongxin-77/lan-file-browser/releases" {
+		t.Fatalf("API 路径: %s", p)
+	}
+	s := e.c.Status()
+	if !s.HasUpdate || s.Latest != "1.2.0-beta.10" || !strings.Contains(s.InstallerURL, "/download/v1.2.0-beta.10/") {
+		t.Fatalf("状态: %+v", s)
+	}
+	e.c.CacheAPKs(context.Background())
+	if _, ver, ok := e.c.APK("arm64-v8a"); !ok || ver != "1.2.0-beta.10" {
+		t.Fatalf("APK: %s %v", ver, ok)
+	}
+
+	// 同号正式版高于其预发布版
+	e = newEnv(t, "1.2.0-beta.1", "v1.2.0")
+	e.f.pre = []string{"v1.2.0-beta.9"}
+	if err := e.c.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if s := e.c.Status(); !s.HasUpdate || s.Latest != "1.2.0" {
+		t.Fatalf("正式版应胜出: %+v", s)
+	}
+}
+
+// 当前为正式版：只看 releases/latest，忽略预发布。
+func TestStableIgnoresPrerelease(t *testing.T) {
+	e := newEnv(t, "1.1.0", "v1.1.0")
+	e.f.pre = []string{"v1.2.0-beta.1"}
+	if err := e.c.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := e.f.apiPath.Load().(string); p != "/repos/tongxin-77/lan-file-browser/releases/latest" {
+		t.Fatalf("API 路径: %s", p)
+	}
+	if s := e.c.Status(); s.HasUpdate || s.Latest != "1.1.0" {
+		t.Fatalf("状态: %+v", s)
 	}
 }
