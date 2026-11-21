@@ -11,10 +11,12 @@ import '../api/lfb_client.dart';
 import '../app.dart' show vaultController;
 import '../models/file_item.dart';
 import '../models/subtitle.dart';
+import '../services/orientation.dart';
 import '../services/platform.dart';
 import '../services/playback.dart';
 import '../theme.dart';
 import '../widgets/file_tile.dart';
+import '../widgets/player_bottom_bar.dart';
 import '../widgets/up_next_card.dart';
 
 /// libmpv 选项（docs/05-playback.md 4.2），须在 open 之前设置。
@@ -104,15 +106,20 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   bool _drawer = false;
   List<PathItem>? _episodes;
+  bool _landscape = true; // 进入即横屏，可用“旋转屏幕”切换
+
+  /// 横竖屏切换：Activity 声明了 configChanges，不会重建，播放器保持不变。
+  void _rotate() {
+    setState(() => _landscape = !_landscape);
+    lockOrientation(landscape: _landscape);
+    _scheduleHide();
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+    lockOrientation(landscape: true);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     WakelockPlus.enable();
     PlatformService.acquireWifiLock();
@@ -665,10 +672,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       0.0,
       max > 0 ? max : 0.0,
     );
-    const numStyle = TextStyle(
-      color: NightColors.moon,
-      fontFeatures: [FontFeature.tabularFigures()],
-    );
     return [
       // 顶部：返回 + 标题
       Positioned(
@@ -701,13 +704,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     style: const TextStyle(color: NightColors.moon),
                   ),
                 ),
-                TextButton(
-                  onPressed: _showSubtitleMenu,
-                  style: TextButton.styleFrom(
-                    foregroundColor: NightColors.moon,
-                    minimumSize: const Size(48, 48),
+                Flexible(
+                  child: TextButton(
+                    onPressed: _showSubtitleMenu,
+                    style: TextButton.styleFrom(
+                      foregroundColor: NightColors.moon,
+                      minimumSize: const Size(48, 48),
+                    ),
+                    child: Text(
+                      '字幕 · $_subtitleName',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  child: Text('字幕 · $_subtitleName'),
+                ),
+                IconButton(
+                  tooltip: '旋转屏幕',
+                  color: NightColors.moon,
+                  icon: const Icon(Icons.screen_rotation),
+                  onPressed: _rotate,
                 ),
                 const SizedBox(width: 8),
               ],
@@ -715,7 +730,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           ),
         ),
       ),
-      // 底部：进度条；播放键在左下角（双手拇指）
+      // 底部控制栏
       Positioned(
         left: 0,
         right: 0,
@@ -732,60 +747,22 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    iconSize: 36,
-                    color: NightColors.wick,
-                    icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
-                    onPressed: () {
-                      _player.playOrPause();
-                      _scheduleHide();
-                    },
-                  ),
-                  Text(
-                    formatDuration(
-                      Duration(milliseconds: (value * 1000).round()),
-                    ),
-                    style: numStyle,
-                  ),
-                  Expanded(
-                    child: Slider(
-                      value: value,
-                      max: max > 0 ? max : 1,
-                      onChanged: max > 0
-                          ? (v) => setState(() => _dragSeconds = v)
-                          : null,
-                      // 松手才跳转，落点精确
-                      onChangeEnd: max > 0
-                          ? (v) {
-                              setState(() => _dragSeconds = null);
-                              _seek(v);
-                            }
-                          : null,
-                    ),
-                  ),
-                  Text(formatDuration(_duration), style: numStyle),
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: _toggleDrawer,
-                    style: TextButton.styleFrom(
-                      foregroundColor: NightColors.moon,
-                      minimumSize: const Size(48, 48),
-                    ),
-                    icon: const Icon(Icons.grid_view),
-                    label: const Text('选集'),
-                  ),
-                  TextButton.icon(
-                    onPressed: _playNext,
-                    style: TextButton.styleFrom(
-                      foregroundColor: NightColors.moon,
-                      minimumSize: const Size(48, 48),
-                    ),
-                    icon: const Icon(Icons.skip_next),
-                    label: const Text('下一集'),
-                  ),
-                ],
+              child: PlayerBottomBar(
+                playing: _playing,
+                value: value,
+                max: max,
+                duration: _duration,
+                onPlayPause: () {
+                  _player.playOrPause();
+                  _scheduleHide();
+                },
+                onDrag: (v) => setState(() => _dragSeconds = v),
+                onDragEnd: (v) {
+                  setState(() => _dragSeconds = null);
+                  _seek(v);
+                },
+                onEpisodes: _toggleDrawer,
+                onNext: _playNext,
               ),
             ),
           ),

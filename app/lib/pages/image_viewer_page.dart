@@ -6,6 +6,7 @@ import '../api/lfb_client.dart';
 import '../models/file_item.dart';
 import '../models/share.dart';
 import '../services/image_saver.dart';
+import '../services/orientation.dart';
 import '../theme.dart';
 import '../widgets/file_tile.dart';
 import '../widgets/thumb.dart';
@@ -39,6 +40,7 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
   late int _index = widget.initialIndex;
   bool _chrome = true;
   bool _saving = false;
+  bool _landscape = false; // 其他页面竖屏；横图可点“旋转屏幕”横过来看
 
   static const _stripCell = 60.0;
 
@@ -46,7 +48,13 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
   void dispose() {
     _pages.dispose();
     _strip.dispose();
+    if (_landscape) lockOrientation(landscape: false); // 离开时恢复竖屏
     super.dispose();
+  }
+
+  void _rotate() {
+    setState(() => _landscape = !_landscape);
+    lockOrientation(landscape: _landscape);
   }
 
   String _pathOf(FileItem f) => joinPath(widget.dir, f.name);
@@ -164,6 +172,12 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
                   ),
                 ],
               ),
+            ),
+            IconButton(
+              tooltip: '旋转屏幕',
+              color: NightColors.moon,
+              icon: const Icon(Icons.screen_rotation),
+              onPressed: _rotate,
             ),
           ],
         ),
