@@ -91,6 +91,17 @@ App ◀──(UDP 单播回复 JSON {id,name,version,port,ips})── 服务端
 
 App 收到回复后按 2.1 的方式并发 `GET /api/ping` 选 IP（回复的来源地址可优先尝试），`needPair` 以 ping 结果为准。
 
+App 实现（`lib/services/discovery.dart`）：
+
+| 项 | 规则 |
+| ---- | ---- |
+| 广播目标 | `255.255.255.255:8687` 与当前 Wi-Fi / 有线网络的子网定向广播地址（原生 `wifiAddress()` 返回 `IP/前缀`，Dart 计算，如 `192.168.1.23/24` → `192.168.1.255`） |
+| 收发 | 连发 3 次（间隔 500ms），共收 2 秒；同 `id` 的多条回复合并地址（来源地址在前）；不是合法 JSON、缺 `id` 或 `port` 不是整数的回复忽略 |
+| MulticastLock | 扫描期间经 MethodChannel `acquireMulticastLock` / `releaseMulticastLock` 持有（需 `CHANGE_WIFI_MULTICAST_STATE`），失败忽略 |
+| VPN | 进程已 `bindProcessToNetwork(Wi-Fi)`（7.1）时 UDP socket 同样走 Wi-Fi |
+| 连接页 | 进入即扫描，列出“电脑名 · 来源 IP”，可“重新扫描”；已保存凭据的电脑标“已配对”，点了更新其地址并直接用已保存凭据连接；未配对的点了把 `来源 IP:端口` 填入手动输入框，输 6 位 PIN 后“配对”（回复里的 `ips` 一并保存为候选地址） |
+| 重连 | 已保存的全部地址都连不上时自动扫描，按 `serverId` 找到后用旧 token 校验新地址并保存（第 6 节） |
+
 发现到服务器后，若 `needPair=true`，App 提示用户输入服务端控制台/本机网页显示的 **6 位 PIN**。
 
 ### 2.3 手动输入 IP:端口
@@ -199,7 +210,11 @@ flowchart TD
     A[App 启动] --> B[正在连接 电脑名: 并发 ping lastIp + ips, 带 token, 3s]
     B -- 某地址成功且 id 匹配 --> E[该地址设为 lastIp 并保存] --> OK[进入首页]
     B -- id 匹配且 needPair=true / 401 --> X[清该电脑 token, 回连接页: 已将本机移除]
-    B -- 其他失败 --> F[保留凭据, 显示连不上原因 + 重试 / 修改地址 / 切换或添加电脑]
+    B -- 其他失败 --> D[UDP 广播按 serverId 查找]
+    D -- 找到 --> D2[用旧 token ping 回复中的地址] -- 成功 --> E
+    D2 -- id 匹配且 needPair=true --> X
+    D -- 未找到 --> F[保留凭据, 显示连不上原因 + 重试 / 修改地址 / 切换或添加电脑]
+    D2 -- 其他失败 --> F
     F -- 退避 2/4/8/16/30s 自动重试, 之后每 30s --> B
     F -- 修改地址 --> M[用旧 token ping 新地址] -- id 一致且 token 有效 --> E2[保存新地址, 旧地址保留为候选] --> OK
     M -- id 不符 --> F
@@ -207,8 +222,8 @@ flowchart TD
 
 - ping 返回的 `id` 与保存的 `serverId` 不符时，视为该地址被其他电脑占用：跳过该地址，不算授权失效。
 - 电脑换了 IP 且新 IP 不在已知地址中：在“正在连接”页点“修改地址”输入新 IP:端口，无需重新配对。
-- 运行中断线：播放器按退避重试（05 §4.3），每次重试、首页下拉刷新都会并发轮询全部已知地址，换到可用地址后保存为 `lastIp`。
-- UDP 广播按 serverId 查找新 IP 尚未实现（自动发现完成后接入上述流程）。
+- 已知地址都不通时（且没有地址表示 token 无效）自动 UDP 广播按 `serverId` 查找（2.2），找到后用旧 token 校验回复里的地址与端口，成功即保存为 `lastIp` / `port`——这是电脑换 IP 后免重新配对的主路径；广播不通（AP 隔离、路由器拦广播）时用“修改地址”。
+- 运行中断线：播放器按退避重试（05 §4.3），每次重试、首页下拉刷新都走同一重连流程（全部已知地址 + 按 `serverId` 发现）。
 
 ## 7. Windows 防火墙与网络排错
 

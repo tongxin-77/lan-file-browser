@@ -5,6 +5,7 @@ import 'models/server.dart';
 import 'pages/connect_page.dart';
 import 'pages/home_page.dart';
 import 'pages/startup_page.dart';
+import 'services/discovery.dart';
 import 'services/server_store.dart';
 import 'services/update_checker.dart';
 import 'services/vault.dart';
@@ -12,6 +13,7 @@ import 'theme.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 final serverStore = ServerStore();
+final lanDiscovery = LanDiscovery();
 
 /// 加密片库会话（仅内存）；上锁时清空图片内存缓存并回到首页（04 §8）。
 final vaultController = VaultController()..onLocked = _onVaultLocked;
@@ -46,7 +48,7 @@ class LfbApp extends StatelessWidget {
 }
 
 /// 已配对服务器的客户端：任何带 token 的请求 401 → 清 token 回连接页（01 §3.3）；
-/// 断线重连会尝试全部已知地址，换地址后保存（01 §6）。
+/// 断线重连会尝试全部已知地址，都不通再按 serverId 自动发现，换地址后保存（01 §6）。
 LfbClient clientFor(SavedServer server, String token) => LfbClient(
   host: server.lastIp,
   port: server.port,
@@ -54,7 +56,11 @@ LfbClient clientFor(SavedServer server, String token) => LfbClient(
   serverId: server.serverId,
   fallbackHosts: server.ips,
   onUnauthorized: () => _signOut(server),
-  onHostChanged: (ip) => serverStore.save(server.withAddress(ip)),
+  onHostChanged: (ip, port) => serverStore.save(server.withAddress(ip, port)),
+  rediscover: () async {
+    final s = await lanDiscovery.find(server.serverId);
+    return s == null ? null : (hosts: s.candidates, port: s.port);
+  },
 );
 
 bool _signingOut = false;

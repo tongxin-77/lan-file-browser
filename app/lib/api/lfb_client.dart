@@ -26,17 +26,21 @@ class LfbClient {
     this.timeout = const Duration(seconds: 10),
     this.fallbackHosts = const [],
     this.onHostChanged,
+    this.rediscover,
   }) : _http = httpClient ?? http.Client();
 
-  /// 当前使用的地址；[reconnect] 成功换到其他已知地址时改变。
+  /// 当前使用的地址与端口；[reconnect] 成功换到其他地址时改变。
   String host;
-  final int port;
+  int port;
 
   /// 除 [host] 外的已知地址（01 §6），[reconnect] 时一并尝试。
   final List<String> fallbackHosts;
 
-  /// [reconnect] 换了地址后回调（用于保存新的 lastIp）。
-  final void Function(String host)? onHostChanged;
+  /// [reconnect] 换了地址后回调（用于保存新的 lastIp / port）。
+  final void Function(String host, int port)? onHostChanged;
+
+  /// 已知地址都不通时按 serverId 在局域网查找的新地址（01 §2.2、§6）；找不到返回 null。
+  final Future<({List<String> hosts, int port})?> Function()? rediscover;
   final String? token;
 
   /// 已配对服务器的 id；重连时 ping 结果需与之匹配（01 §6）。
@@ -80,14 +84,43 @@ class LfbClient {
     return p;
   }
 
-  /// 断线重连：并发 [verify] [host] 与 [fallbackHosts]，第一个成功的地址设为 [host]。
+  /// 断线重连：并发 [verify] [host] 与 [fallbackHosts]，第一个成功的地址设为 [host]；
+  /// 都不通时用 [rediscover] 在局域网按 serverId 查找新地址再试（01 §6）。
   /// 只有 id 匹配的电脑明确表示 token 无效时才触发 [onUnauthorized] 并抛 401；
   /// 其余失败（超时、不可达、id 不符、5xx）一律抛 [NetworkException]。
   Future<PingInfo> reconnect({
     Duration timeout = const Duration(seconds: 3),
   }) async {
-    final hosts = {host, ...fallbackHosts}.toList();
-    final done = Completer<(String, PingInfo)?>();
+    var r = await _tryHosts({host, ...fallbackHosts}.toList(), port, timeout);
+    if (r.ok == null && !r.unauthorized) {
+      final found = await rediscover?.call();
+      if (found != null) r = await _tryHosts(found.hosts, found.port, timeout);
+    }
+    if (r.ok case (final h, final pt, final p)) {
+      if (h != host || pt != port) {
+        host = h;
+        port = pt;
+        onHostChanged?.call(h, pt);
+      }
+      return p;
+    }
+    if (r.unauthorized) {
+      onUnauthorized?.call();
+      throw const ApiException(401, 'UNAUTHORIZED', '授权已失效，请重新配对');
+    }
+    throw const NetworkException();
+  }
+
+  /// 并发 verify：[ok] 为第一个成功的 (地址, 端口, ping)；都失败时
+  /// [unauthorized] 表示是否有 id 匹配的电脑说 token 无效。
+  Future<({(String, int, PingInfo)? ok, bool unauthorized})> _tryHosts(
+    List<String> hosts,
+    int port,
+    Duration timeout,
+  ) async {
+    if (hosts.isEmpty) return (ok: null, unauthorized: false);
+    final done =
+        Completer<({(String, int, PingInfo)? ok, bool unauthorized})>();
     var pending = hosts.length;
     var unauthorized = false;
     for (final h in hosts) {
@@ -100,29 +133,20 @@ class LfbClient {
           )
           .verify(timeout: timeout)
           .then((p) {
-            if (!done.isCompleted) done.complete((h, p));
+            if (!done.isCompleted) {
+              done.complete((ok: (h, port, p), unauthorized: false));
+            }
           })
           .catchError((Object e) {
             if (e is ApiException && e.isUnauthorized) unauthorized = true;
           })
           .whenComplete(() {
-            if (--pending == 0 && !done.isCompleted) done.complete(null);
+            if (--pending == 0 && !done.isCompleted) {
+              done.complete((ok: null, unauthorized: unauthorized));
+            }
           });
     }
-    final ok = await done.future;
-    if (ok == null) {
-      if (unauthorized) {
-        onUnauthorized?.call();
-        throw const ApiException(401, 'UNAUTHORIZED', '授权已失效，请重新配对');
-      }
-      throw const NetworkException();
-    }
-    final (h, p) = ok;
-    if (h != host) {
-      host = h;
-      onHostChanged?.call(h);
-    }
-    return p;
+    return done.future;
   }
 
   /// `POST /api/pair`：code 为 6 位 PIN 或二维码一次性码。
