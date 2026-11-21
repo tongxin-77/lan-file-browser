@@ -99,6 +99,19 @@ func TestOrganizeSettings(t *testing.T) {
 	if sh := e.s.Config.Get().Share("sh1"); sh.Organize == nil || !sh.Organize.Enabled {
 		t.Fatal("应写入配置")
 	}
+	if r.Organize.Sources[0].KeepStructure || r.Organize.Sources[1].KeepStructure {
+		t.Fatalf("未传 keepStructure 应为关闭: %+v", r.Organize.Sources)
+	}
+	// keepStructure 读写：PUT 保存后 GET 返回，且写入配置
+	r.Organize.Sources[1].KeepStructure = true
+	if w := e.do("PUT", "/api/admin/shares/sh1/organize", r.Organize); w.Code != 200 ||
+		!decode[orgResp](t, w).Organize.Sources[1].KeepStructure || decode[orgResp](t, w).Organize.Sources[0].KeepStructure {
+		t.Fatalf("PUT keepStructure: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("GET", "/api/admin/shares/sh1/organize", nil); !strings.Contains(w.Body.String(), `"keepStructure":true`) ||
+		!e.s.Config.Get().Share("sh1").Organize.Sources[1].KeepStructure {
+		t.Fatalf("GET keepStructure: %s", w.Body)
+	}
 	// 暂停 / 继续写入 paused
 	if w := e.do("POST", "/api/admin/shares/sh1/organize/pause", nil); w.Code != 200 || !e.s.Config.Get().Share("sh1").Organize.Paused {
 		t.Fatalf("pause: %d", w.Code)
@@ -178,6 +191,16 @@ func TestOrganizeDryRunAndItems(t *testing.T) {
 	if dr.Total != 1 || dr.Items[0].TargetPath != "剧集/Show/第1季/Show.S01E01.mkv" || dr.Items[0].Action != "copy" {
 		t.Fatalf("%+v", dr)
 	}
+	// 保持源文件夹结构：试运行显示保留结构后的目标路径
+	os.MkdirAll(filepath.Join(dl, "A", "B"), 0o755)
+	os.Rename(filepath.Join(dl, "Show.S01E01.mkv"), filepath.Join(dl, "A", "B", "Show.S01E01.mkv"))
+	e.put("sh1", map[string]any{"enabled": true, "sources": []any{map[string]any{"path": dl, "mode": "copy", "keepStructure": true}}})
+	dr.Items = nil
+	json.Unmarshal(e.do("POST", "/api/admin/shares/sh1/organize/dry-run", nil).Body.Bytes(), &dr)
+	if dr.Total != 1 || dr.Items[0].TargetPath != "A/B/Show.S01E01.mkv" || dr.Items[0].Category != "kept" {
+		t.Fatalf("保持结构试运行: %+v", dr)
+	}
+	e.put("sh1", map[string]any{"enabled": true, "sources": []any{src(dl, "copy")}})
 	if entries, _ := os.ReadDir(e.lib); len(entries) != 0 {
 		t.Fatal("试运行不应产生文件")
 	}

@@ -8,7 +8,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"lfb/server/internal/config"
 	"lfb/server/internal/episode"
+	"lfb/server/internal/fsx"
 )
 
 // 类别（06 文档第 6 节 category）。
@@ -17,6 +19,7 @@ const (
 	CatEpisode  = "episode"
 	CatMovie    = "movie"
 	CatUnsorted = "unsorted"
+	CatKept     = "kept" // 保持源文件夹结构，不归类
 )
 
 // 文件种类（kind）。
@@ -128,6 +131,23 @@ func classify(rel string, mtime time.Time, photoTime func() (time.Time, bool)) P
 		return Plan{CatMovie, "电影", name}
 	}
 	return Plan{CatUnsorted, "未分类", name} // 5
+}
+
+// keepPlan 保持源文件夹结构：目标即相对源文件夹的路径，各段须通过 fsx 词法校验，否则返回 false（不整理）。
+func keepPlan(rel string) (Plan, bool) {
+	if rel == "" || !fsx.ValidRel(rel) {
+		return Plan{}, false
+	}
+	dir, name := path.Split(rel)
+	return Plan{CatKept, strings.TrimSuffix(dir, "/"), name}, true
+}
+
+// planFor 按源的设置计算目标：保持结构或按第 5 节归类。
+func planFor(src config.OrganizeSource, e entry, photoTime func() (time.Time, bool)) (Plan, bool) {
+	if src.KeepStructure {
+		return keepPlan(e.Rel)
+	}
+	return classify(e.Rel, e.Mtime, photoTime), true
 }
 
 // nameDate 取文件名中前后不接数字的合法日期：YYYYMMDD 或以 - _ . 分隔的 YYYY-MM-DD 等

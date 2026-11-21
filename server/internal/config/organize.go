@@ -21,6 +21,8 @@ type OrganizeSource struct {
 	Path      string `json:"path"`                // 真实路径
 	Mode      string `json:"mode"`                // copy / move
 	AfterMove string `json:"afterMove,omitempty"` // 仅 move：recycle（默认）/ delete
+	// KeepStructure 为 true 时保持源文件夹结构（目标 = 库目录/相对源文件夹的路径），不自动归类；旧配置缺省为 false
+	KeepStructure bool `json:"keepStructure"`
 }
 
 // 源文件夹取值。

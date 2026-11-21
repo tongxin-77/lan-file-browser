@@ -44,6 +44,12 @@ func validateRel(rel string) ([]string, error) {
 	return segs, nil
 }
 
+// ValidRel 报告相对路径（/ 或 \ 分隔）能否通过第 1 层词法校验。
+func ValidRel(rel string) bool {
+	_, err := validateRel(rel)
+	return err == nil
+}
+
 func validSeg(s string) bool {
 	if s == "" || s == "." || s == ".." || utf8.RuneCountInString(s) > maxSegRunes {
 		return false

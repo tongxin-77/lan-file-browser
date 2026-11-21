@@ -101,7 +101,7 @@ func TestVaultOrganizeRoundTrip(t *testing.T) {
 		Organize: &Organize{Enabled: true, Paused: true, RateLimit: &rate, MaxRetries: &retries, PauseOnPlay: &onPlay,
 			Sources: []OrganizeSource{
 				{ID: "s1a2", Path: `D:\Downloads\BT`, Mode: "copy"},
-				{ID: "s3b4", Path: `D:\Downloads\Browser`, Mode: "move", AfterMove: "recycle"},
+				{ID: "s3b4", Path: `D:\Downloads\Browser`, Mode: "move", AfterMove: "recycle", KeepStructure: true},
 			}},
 	}}
 	c.OrganizeDefaults.Interval = 15
@@ -109,7 +109,7 @@ func TestVaultOrganizeRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, fileName))
-	for _, k := range []string{`"passwordHash"`, `"memoryKiB"`, `"keyLen"`, `"afterMove"`, `"pauseOnPlay"`, `"rateLimit"`, `"organizeDefaults"`} {
+	for _, k := range []string{`"passwordHash"`, `"memoryKiB"`, `"keyLen"`, `"afterMove"`, `"keepStructure"`, `"pauseOnPlay"`, `"rateLimit"`, `"organizeDefaults"`} {
 		if !strings.Contains(string(data), k) {
 			t.Errorf("JSON 缺少字段 %s", k)
 		}
@@ -127,5 +127,22 @@ func TestVaultOrganizeRoundTrip(t *testing.T) {
 	}
 	if c2.OrganizeDefaults.Interval != 15 || c2.OrganizeDefaults.RateLimit != 50 {
 		t.Fatalf("全局默认值: %+v", c2.OrganizeDefaults)
+	}
+}
+
+// 旧配置的源文件夹没有 keepStructure：读入视为关闭（按类型/剧名归类，行为不变）。
+func TestOrganizeKeepStructureCompat(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"shares":[{"id":"s1","name":"库","path":"E:/Lib","organize":{"enabled":true,
+		"sources":[{"id":"a1","path":"D:/dl","mode":"copy"}]}}]}`
+	if err := os.WriteFile(filepath.Join(dir, fileName), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src := c.Share("s1").Organize.Sources[0]; src.KeepStructure {
+		t.Fatalf("旧配置应视为关闭: %+v", src)
 	}
 }

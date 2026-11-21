@@ -32,7 +32,7 @@
 | 字段 | 说明 | 全局默认 |
 | ---- | ---- | ---- |
 | `enabled` | 是否开启自动整理 | — |
-| `sources[]` | `{id, path, mode, afterMove}`；`id` 为短随机 ID（状态按它归属），`mode` 为 `copy` / `move`；`afterMove`（仅移动模式）为 `recycle`（移入回收站）/ `delete`（直接删除） | `afterMove`: `recycle` |
+| `sources[]` | `{id, path, mode, afterMove, keepStructure}`；`id` 为短随机 ID（状态按它归属），`mode` 为 `copy` / `move`；`afterMove`（仅移动模式）为 `recycle`（移入回收站）/ `delete`（直接删除）；`keepStructure` 为 `true` 时保持源文件夹结构（5.4），缺省 `false`（旧配置读入即为关闭，按第 5 节自动归类） | `afterMove`: `recycle`；`keepStructure`: `false`（管理页新加源文件夹时默认勾选） |
 | `interval` | 扫描间隔（分钟） | 30 |
 | `rateLimit` | 复制限速（MB/s，0 = 不限） | 50 |
 | `minFree` | 库盘最小剩余空间（GB，`null` 时取“总容量 10% 与 20 GB 的较小值”） | 10% / 20 GB 取小 |
@@ -48,7 +48,7 @@
   "organize": {
     "enabled": true,
     "sources": [
-      { "id": "s1a2", "path": "D:\\Downloads\\BT", "mode": "copy" },
+      { "id": "s1a2", "path": "D:\\Downloads\\BT", "mode": "copy", "keepStructure": true },
       { "id": "s3b4", "path": "D:\\Downloads\\Browser", "mode": "move", "afterMove": "recycle" }
     ],
     "interval": null, "rateLimit": 30, "minFree": null, "maxRetries": null, "paused": false
@@ -89,6 +89,8 @@
 
 ## 5. 自动归类
 
+> 源的 `keepStructure` 为 `true` 时不做本节归类，见 5.4。
+
 ### 5.1 规则（按顺序取第一个命中）
 
 | # | 类别 | 识别 | 目标（相对库目录） |
@@ -125,6 +127,15 @@
 | 孤立字幕 | 找不到对应视频的字幕不处理 |
 | 目标重名 | 目标已存在：大小与快速指纹相同 → 记为“重复”，不复制（“移动”模式下源文件照常进回收站）；不同 → 按 03 §4.9 加 ` (1)`、` (2)`… |
 
+### 5.4 保持源文件夹结构（`keepStructure`）
+
+| 项 | 规则 |
+| ---- | ---- |
+| 目标 | 相对源文件夹根的路径原样保留：源文件夹里的 `A/B/x.mp4` → 库目录 `A/B/x.mp4`；源文件夹根下的 `y.mkv` → 库目录根 `y.mkv`；类别记为 `kept` |
+| 路径安全 | 相对路径每一段都须通过 03 §2.2 的词法校验（`fsx.ValidRel`），不通过的文件不整理（试运行动作 `skip`）；写入仍在库目录 `os.Root` 内，不能逃出片库 |
+| 照旧 | 隐藏项/链接跳过（4.1）、下载完成判定（4.2）、字幕跟随与重名（5.3）、复制/移动/回收站、播放暂停、试运行均与归类模式相同 |
+| 临时文件清理 | 片库任一源开启本选项时，启动时清理整个库目录中残留的 `.lfb-copying-*`（否则只清理 `照片` `剧集` `电影` `未分类`） |
+
 ## 6. 状态与去重
 
 ```mermaid
@@ -157,7 +168,7 @@ SQLite 表 `organize_items`（同 03 的 `data.db`）：
 | `share_id` / `source_id` | 所属片库 / 源文件夹 |
 | `src_path` / `src_key` | 源相对路径（相对源文件夹）/ 其 `strings.ToLower` 结果（同 03 `path_key` 做法） |
 | `size` / `mtime` / `fingerprint` | 入队时的大小、修改时间、快速指纹 |
-| `kind` / `category` | `video` `image` `subtitle` / `photo` `episode` `movie` `unsorted` |
+| `kind` / `category` | `video` `image` `subtitle` / `photo` `episode` `movie` `unsorted` `kept`（保持源文件夹结构，5.4） |
 | `target_path` | 库目录内相对路径（最终名） |
 | `state` | `queued` `copying` `done` `duplicate` `failed` |
 | `source_action` | `kept`（复制）`recycled` `deleted`（`afterMove: delete`）`renamed` `recycle_failed` |
@@ -216,11 +227,11 @@ SQLite 表 `organize_items`（同 03 的 `data.db`）：
 | 区域 | 内容 |
 | ---- | ---- |
 | 开关 | “自动整理”开关；开启后展开以下内容。片库列表中已开启的片库显示“自动整理”标记与当前状态 |
-| 源文件夹 | 列表：路径（浏览选择）、复制/移动（单选，附说明：“复制：保留源文件，不影响做种”“移动：复制并校验后处理源文件”，移动时再选“移入回收站（默认）/ 直接删除”，选直接删除时提示“删除后无法从回收站恢复”）、删除；可添加多个。同盘时该行显示黄色提醒（第 1 节文案） |
+| 源文件夹 | 列表：路径（浏览选择）、复制/移动（单选，附说明：“复制：保留源文件，不影响做种”“移动：复制并校验后处理源文件”，移动时再选“移入回收站（默认）/ 直接删除”，选直接删除时提示“删除后无法从回收站恢复”）、“保持源文件夹结构”勾选框（5.4，新加源文件夹时默认勾选）、删除；可添加多个。同盘时该行显示黄色提醒（第 1 节文案） |
 | 参数 | 扫描间隔、限速、最小剩余空间、重试次数；留空 = 使用全局默认（显示默认值作为占位） |
 | 状态 | 状态（空闲 / 扫描中 / 复制中 x% · y MB/s / 已暂停：原因 / 片库离线）、上次扫描时间、下次扫描时间；计数：已整理、重复、队列中、观察中、失败 |
 | 操作 | 立即扫描、试运行、暂停/继续 |
-| 试运行 | 列出“哪个文件会被整理到哪里”：源文件、类别、目标路径、动作（复制/移动/重命名/重复跳过/下载中暂不整理/被占用）；**不复制、不写记录**，供用户确认规则 |
+| 试运行 | 列出“哪个文件会被整理到哪里”：源文件、类别、目标路径（保持结构时为保留结构后的路径）、动作（复制/移动/重命名/重复跳过/下载中暂不整理/被占用/不整理）；**不复制、不写记录**，供用户确认规则 |
 | 失败与记录 | 失败列表（文件名、原因、次数，单条/全部“重试”）；最近整理记录（时间、源 → 目标），支持“重新整理” |
 | 全局设置 | “设置”页增加自动整理默认值：间隔、限速、最小剩余空间、重试次数 |
 
@@ -250,7 +261,7 @@ SQLite 表 `organize_items`（同 03 的 `data.db`）：
 | `current` | `{name, bytes, total, speed}` 或 `null` |
 | `freeBytes` / `minFreeBytes` | 库盘剩余 / 需保留 |
 
-试运行 `items[]`：`{sourceId, srcPath, category, targetPath, action, note}`，`action` 为 `copy` `move` `rename` `duplicate` `waiting` `locked` `done`；最多返回 500 条，另给 `total`。
+试运行 `items[]`：`{sourceId, srcPath, category, targetPath, action, note}`，`action` 为 `copy` `move` `rename` `duplicate` `waiting` `locked` `done` `skip`（保持结构时路径段未通过校验）；最多返回 500 条，另给 `total`。
 
 ## 12. 分期与需同步更新
 
@@ -269,3 +280,4 @@ SQLite 表 `organize_items`（同 03 的 `data.db`）：
 | ---- | ---- | ---- |
 | 1 | “移动”模式下源文件的处理 | 每个源文件夹可选：移入回收站（默认）/ 直接删除 |
 | 2 | “有人播放时暂停”的范围 | 仅当播放文件与复制涉及的硬盘相同时暂停；每个片库可用 `pauseOnPlay` 开关关闭 |
+| 3 | 是否支持不归类、按原目录结构整理 | 每个源文件夹可选“保持源文件夹结构”（`keepStructure`，5.4）；管理页新加源时默认勾选，旧配置视为关闭 |
