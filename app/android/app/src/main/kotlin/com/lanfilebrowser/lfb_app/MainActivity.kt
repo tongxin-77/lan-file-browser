@@ -2,6 +2,10 @@ package com.lanfilebrowser.lfb_app
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -15,9 +19,11 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private var wifiLock: WifiManager.WifiLock? = null
+    private var wifiCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        bindProcessToWifi()
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.lanfilebrowser/platform")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -29,6 +35,7 @@ class MainActivity : FlutterActivity() {
                         releaseWifiLock()
                         result.success(null)
                     }
+                    "isVpnActive" -> result.success(isVpnActive())
                     "deviceName" -> result.success("${Build.MANUFACTURER} ${Build.MODEL}")
                     // 加密片库：最近任务缩略图空白、禁止截屏（docs/04-vault.md 8）
                     "setSecure" -> {
@@ -97,8 +104,56 @@ class MainActivity : FlutterActivity() {
         wifiLock = null
     }
 
+    // 开着 VPN 时让整个进程绕过 VPN 走 Wi-Fi（docs/01-connection.md 7.1）。
+    // 默认 NetworkRequest 带 NOT_VPN，只匹配底层 Wi-Fi；VPN 不允许绕过时绑定失败，忽略即可。
+    private fun bindProcessToWifi() {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            private var bound: Network? = null
+
+            override fun onAvailable(network: Network) {
+                try {
+                    if (cm.bindProcessToNetwork(network)) bound = network
+                } catch (ignored: Exception) {
+                }
+            }
+
+            override fun onLost(network: Network) {
+                if (network != bound) return
+                bound = null
+                try {
+                    cm.bindProcessToNetwork(null)
+                } catch (ignored: Exception) {
+                }
+            }
+        }
+        try {
+            cm.registerNetworkCallback(request, callback)
+            wifiCallback = callback
+        } catch (ignored: Exception) {
+        }
+    }
+
+    private fun isVpnActive(): Boolean {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return false
+        @Suppress("DEPRECATION")
+        return cm.allNetworks.any {
+            cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        }
+    }
+
     override fun onDestroy() {
         releaseWifiLock()
+        wifiCallback?.let {
+            try {
+                getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(it)
+            } catch (ignored: Exception) {
+            }
+        }
+        wifiCallback = null
         super.onDestroy()
     }
 }

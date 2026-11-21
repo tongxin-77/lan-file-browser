@@ -208,6 +208,16 @@ netsh advfirewall firewall add rule name="LAN File Browser UDP" dir=in action=al
 | 配对提示已锁定 | 同一台设备（IP）连续输错 PIN 5 次 | 5 分钟后重试，或改用扫码配对（不受锁定影响） |
 | 能 ping 但请求 401 | token 被吊销 / 服务端数据被清 | 重新配对 |
 | 二维码中 IP 都是虚拟网卡地址 | 网卡识别问题 | 手动输入真实局域网 IP |
+| 手机开着 VPN（如 Clash）时连不上 | 局域网请求被 VPN 接管 | 见 7.1 |
+
+### 7.1 手机开着 VPN
+
+| 项 | 设计 |
+| ---- | ---- |
+| 绕过 VPN | App 启动时（`MainActivity`）用 `registerNetworkCallback` 跟踪底层 Wi-Fi（`TRANSPORT_WIFI`，默认请求带 `NOT_VPN`，不匹配 VPN 网络）：可用时 `bindProcessToNetwork(wifi)`，整个进程（Dart `HttpClient`、libmpv 原生 socket）的连接都走 Wi-Fi；该 Wi-Fi 丢失时 `bindProcessToNetwork(null)` 解绑。需 `ACCESS_NETWORK_STATE` |
+| 局限 | 仅当 VPN 允许绕过（`VpnService.Builder.allowBypass()`）时有效；不允许时绑定失败或连接仍被 VPN 接管，异常一律忽略、不影响 App。绑定后 App 访问外网（如检查更新）也走 Wi-Fi 而非 VPN |
+| 检测与提示 | MethodChannel `isVpnActive()`：任一网络带 `TRANSPORT_VPN` 即为真。以下网络类错误（`NetworkException`，服务端已响应的错误除外）在为真时另起一行追加：“手机开着 VPN，可能拦截了局域网连接。请在 VPN 里打开‘绕过局域网/私有网络’，或在分应用代理中排除 LAN File Browser。” |
+| 提示位置 | 连接页扫码 / 手动配对失败、超时、“二维码里的地址都连不上”；启动时验证上次服务器失败；播放断线重连全部失败 |
 
 ## 8. 已确认决策
 

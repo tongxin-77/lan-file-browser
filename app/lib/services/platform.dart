@@ -1,5 +1,18 @@
 import 'package:flutter/services.dart';
 
+/// 连接失败且手机开着 VPN 时追加的提示（01 §7.1）。
+const vpnHint =
+    '手机开着 VPN，可能拦截了局域网连接。请在 VPN 里打开“绕过局域网/私有网络”，'
+    '或在分应用代理中排除 LAN File Browser。';
+
+/// [vpn] 为真时在连接错误 [message] 后另起一行追加 [vpnHint]。
+String withVpnHint(String message, {required bool vpn}) =>
+    vpn ? '$message\n$vpnHint' : message;
+
+/// 查询 VPN 状态后为连接错误追加提示。
+Future<String> connectionErrorText(String message) async =>
+    withVpnHint(message, vpn: await PlatformService.isVpnActive());
+
 /// Android 原生能力（MainActivity.kt 中的 MethodChannel）。
 class PlatformService {
   static const _channel = MethodChannel('com.lanfilebrowser/platform');
@@ -18,6 +31,15 @@ class PlatformService {
       await _channel.invokeMethod<void>('releaseWifiLock');
     } on Exception {
       // 同上
+    }
+  }
+
+  /// 手机当前是否开着 VPN（任一网络带 TRANSPORT_VPN）。
+  static Future<bool> isVpnActive() async {
+    try {
+      return await _channel.invokeMethod<bool>('isVpnActive') ?? false;
+    } on Exception {
+      return false;
     }
   }
 
