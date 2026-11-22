@@ -26,6 +26,7 @@ type Server struct {
 	Thumbs    *thumb.Service    // 缩略图生成与缓存（03 文档 4.5）
 	Updates   *update.Checker   // 检查更新与 APK 缓存（02 文档第 5 节）
 	Organizer *organize.Manager // 自动整理调度（06 文档）
+	Recycler  organize.Recycler // /api/delete 移入回收站；nil = organize.ShellRecycler
 
 	vault vaultState // 加密片库解锁会话（04 文档），首次使用时创建
 }
@@ -39,7 +40,7 @@ func (s *Server) port() int {
 }
 
 // Handler 注册全部路由。处理函数见 auth_handlers.go、admin_handlers.go、file_handlers.go，
-// P2 见 media_、progress_、thumb_、vault_、organize_handlers.go。
+// P2 见 media_、progress_、thumb_、vault_、organize_handlers.go；P3 见 delete_handlers.go。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -77,7 +78,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/subtitles", s.requireDevice(s.handleSubtitles))
 	mux.HandleFunc("POST /api/progress", s.requireDevice(s.handleProgress))
 	mux.HandleFunc("GET /api/continue", s.requireDevice(s.handleContinue))
+	mux.HandleFunc("DELETE /api/continue", s.requireDevice(s.handleContinueDelete))
 	mux.HandleFunc("GET /api/thumb", s.requireDevice(s.handleThumb))
+
+	// 文件（03 文档 P3）
+	mux.HandleFunc("POST /api/delete", s.requireDevice(s.handleDelete))
 
 	// 加密片库（04 文档）
 	mux.HandleFunc("POST /api/vault/unlock", s.requireDevice(s.handleVaultUnlock))

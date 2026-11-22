@@ -22,4 +22,18 @@ CREATE TABLE progress (
 CREATE INDEX progress_share_updated ON progress (share_id, updated_at DESC);`)
 		return err
 	}})
+	// 继续观看「本设备移除」（03 文档 4.8）：按设备记录移除的「共享+目录」及时间，
+	// 该目录有晚于 hidden_at 的进度时重新出现。share_id、dir_key 均为空串表示清空（隐藏此前全部）。
+	// dir_key 为 path.Dir(progress.Key(path))，根目录为 "."。
+	Register(Migration{Version: 101, Name: "continue_hidden", Up: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+CREATE TABLE continue_hidden (
+	device_id TEXT    NOT NULL,
+	share_id  TEXT    NOT NULL,
+	dir_key   TEXT    NOT NULL,
+	hidden_at INTEGER NOT NULL,
+	PRIMARY KEY (device_id, share_id, dir_key)
+) WITHOUT ROWID;`)
+		return err
+	}})
 }

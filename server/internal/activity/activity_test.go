@@ -155,3 +155,34 @@ func TestCloseReleases(t *testing.T) {
 		t.Fatal("Close 应恢复睡眠")
 	}
 }
+
+// 按文件记录活跃播放：视频流进行中或 60 秒内有进度上报；Playing 对文件本身或其所在目录（任一祖先）为真。
+func TestPlayingFile(t *testing.T) {
+	c := newClock()
+	tr := newTracker(c, nil)
+	end := tr.StreamFile(`D:\Anime\Show\E01.mkv`)
+	if !tr.ActiveOn(VolumeOf(`D:\Anime\Show\E01.mkv`)) {
+		t.Fatal("StreamFile 应同时计入卷的活跃播放")
+	}
+	for p, want := range map[string]bool{
+		`d:\anime\show\e01.mkv`: true, `D:\Anime\Show`: true, `D:\Anime\`: true,
+		`D:\Anime\Show\E02.mkv`: false, `D:\Anime\Sh`: false, `D:\Other`: false,
+	} {
+		if tr.Playing(p) != want {
+			t.Errorf("流进行中 Playing(%s) = %v, want %v", p, !want, want)
+		}
+	}
+	end()
+	if tr.Playing(`D:\Anime\Show\E01.mkv`) {
+		t.Fatal("流结束后不应仍在播放")
+	}
+
+	tr.ProgressFile(`E:\M\a.mp4`)
+	if !tr.Playing(`E:\M\a.mp4`) || !tr.Playing(`E:\M`) || !tr.ActiveOn(VolumeOf(`E:\M\a.mp4`)) {
+		t.Fatal("进度上报后应视为正在播放")
+	}
+	c.add(61 * time.Second)
+	if tr.Playing(`E:\M\a.mp4`) {
+		t.Fatal("超过 60 秒无上报不应视为正在播放")
+	}
+}

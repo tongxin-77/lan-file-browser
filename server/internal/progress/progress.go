@@ -7,6 +7,7 @@ package progress
 import (
 	"context"
 	"database/sql"
+	"path"
 	"strings"
 	"time"
 )
@@ -114,4 +115,36 @@ WHERE share_id IN (?` + strings.Repeat(",?", len(shares)-1) + `) ORDER BY update
 		}
 	}
 	return rows.Err()
+}
+
+// DirKey 返回记录所属的继续观看分组目录键（path.Dir(Key(p))，根目录为 "."）。
+func DirKey(p string) string { return path.Dir(Key(p)) }
+
+// Hide 记录设备在时刻 at 从继续观看中移除共享 share 的目录 dirKey；share、dirKey 均为空串表示清空。
+func Hide(ctx context.Context, db *sql.DB, device, share, dirKey string, at time.Time) error {
+	_, err := db.ExecContext(ctx, `
+INSERT INTO continue_hidden (device_id, share_id, dir_key, hidden_at) VALUES (?, ?, ?, ?)
+ON CONFLICT (device_id, share_id, dir_key) DO UPDATE SET hidden_at = max(hidden_at, excluded.hidden_at)`,
+		device, share, dirKey, at.UnixMilli())
+	return err
+}
+
+// Hidden 返回设备的移除记录：键为 share + "\x00" + dirKey（清空记录的键为 "\x00"），值为移除时间。
+// 更新时间不晚于移除时间的记录不应出现在该设备的继续观看中。
+func Hidden(ctx context.Context, db *sql.DB, device string) (map[string]time.Time, error) {
+	rows, err := db.QueryContext(ctx, `SELECT share_id, dir_key, hidden_at FROM continue_hidden WHERE device_id = ?`, device)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := map[string]time.Time{}
+	for rows.Next() {
+		var share, dir string
+		var ms int64
+		if err := rows.Scan(&share, &dir, &ms); err != nil {
+			return nil, err
+		}
+		m[share+"\x00"+dir] = time.UnixMilli(ms)
+	}
+	return m, rows.Err()
 }

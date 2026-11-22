@@ -14,8 +14,10 @@ const (
 	CodeConflict       = "CONFLICT"
 	CodeTooLarge       = "TOO_LARGE"
 	CodeShareOffline   = "SHARE_OFFLINE"
-	CodeLocked         = "LOCKED"   // 配对锁定（01 文档 3.2）
-	CodeInternal       = "INTERNAL" // 服务端内部错误
+	CodeInUse          = "IN_USE"         // 删除：文件正在播放或被其他程序占用（03 文档 4.10）
+	CodeNoRecycleBin   = "NO_RECYCLE_BIN" // 删除：所在盘没有回收站或放不下（03 文档 4.10）
+	CodeLocked         = "LOCKED"         // 配对锁定（01 文档 3.2）
+	CodeInternal       = "INTERNAL"       // 服务端内部错误
 	CodeNotImplemented = "NOT_IMPLEMENTED"
 )
 
@@ -27,6 +29,8 @@ var codeStatus = map[string]int{
 	CodeConflict:       http.StatusConflict,
 	CodeTooLarge:       http.StatusRequestEntityTooLarge,
 	CodeShareOffline:   http.StatusServiceUnavailable,
+	CodeInUse:          http.StatusConflict,
+	CodeNoRecycleBin:   http.StatusConflict,
 	CodeLocked:         http.StatusLocked,
 	CodeInternal:       http.StatusInternalServerError,
 	CodeNotImplemented: http.StatusNotImplemented,

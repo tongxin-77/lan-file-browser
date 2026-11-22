@@ -13,7 +13,7 @@
     { key: "play", title: "手机能打开看、能播放", note: "这是共享的前提，一直开着。", locked: true },
     { key: "download", title: "手机能下载回去看", note: "存到手机里，出门没网也能看。" },
     { key: "upload", title: "手机能往这里放东西", note: "比如把手机拍的照片传回这台电脑。" },
-    { key: "delete", title: "手机能删除、改名", note: "在手机上删掉的文件，电脑上也会一起没了。", risky: true },
+    { key: "delete", title: "允许手机删除（移入回收站）", note: "手机上删掉的文件会进这台电脑的回收站，可以从回收站找回；所在硬盘没有回收站时不会删除。", risky: true },
     { key: "hidden", title: "显示藏起来的文件", note: "电脑上设为“隐藏”的文件也会出现在手机上。" }
   ];
   var COVERS = ["movie", "anime", "photo", "work", "new"];
@@ -75,7 +75,7 @@
     var p = f.perms, on = [];
     if (p.download) on.push("可下载");
     if (p.upload) on.push("可上传");
-    if (p.delete) on.push("可删改");
+    if (p.delete) on.push("可删除");
     return on.length ? on.join(" · ") : "只能看";
   }
   function pad(n) { return (n < 10 ? "0" : "") + n; }

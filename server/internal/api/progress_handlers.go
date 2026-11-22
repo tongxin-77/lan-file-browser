@@ -11,15 +11,15 @@ import (
 	"strings"
 	"time"
 
-	"lfb/server/internal/activity"
 	"lfb/server/internal/auth"
 	"lfb/server/internal/config"
+	"lfb/server/internal/fsx"
 	"lfb/server/internal/media"
 	"lfb/server/internal/progress"
 )
 
 // 观看进度与继续观看（03 文档 4.8）。存储用 s.Store（data.db，表经 internal/store 迁移创建）；
-// 收到进度上报时须调用 s.Activity.Progress(卷) 供阻止睡眠与整理库判断（05 文档 3.4）。
+// 收到进度上报时须调用 s.Activity.ProgressFile(文件) 供阻止睡眠与整理库判断（05 文档 3.4）。
 
 const (
 	maxContinue    = 20
@@ -86,7 +86,7 @@ func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Activity != nil {
-		s.Activity.Progress(activity.VolumeOf(filepath.Join(sh.Path, in.Path)))
+		s.Activity.ProgressFile(filepath.Join(sh.Path, in.Path))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -113,7 +113,7 @@ func (s *Server) fillProgress(ctx context.Context, dev, share, dirRel string, it
 
 // GET /api/continue —— 按「共享+目录」聚合，取所有设备中最近一条（家庭共享进度），最多 20 条。
 // 只含当前设备可见的共享（加密片库需有效会话）；文件已不存在（含对本设备隐藏、共享离线）的记录跳过，由同目录较早的记录补位。
-// 已看完的条目附 next（下一集）；无下一集则不出现。
+// 已看完的条目附 next（下一集）；无下一集则不出现。本设备移除 / 清空过且此后无新进度的目录不出现。
 func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
 	type item struct {
 		Share      string     `json:"share"`
@@ -136,12 +136,22 @@ func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
 	}
 	items := []item{}
 	if s.Store != nil {
+		hidden, err := progress.Hidden(r.Context(), s.Store, DeviceID(r.Context()))
+		if err != nil {
+			log.Printf("读取继续观看失败: %v", err)
+			writeError(w, CodeInternal, "读取进度失败")
+			return
+		}
+		cleared, hasCleared := hidden["\x00"]
 		names := s.deviceNames()
 		seen := map[string]bool{}
-		err := progress.Recent(r.Context(), s.Store, ids, func(rec progress.Record) bool {
-			group := rec.Share + "\x00" + path.Dir(progress.Key(rec.Path))
-			if seen[group] {
-				return true
+		err = progress.Recent(r.Context(), s.Store, ids, func(rec progress.Record) bool {
+			if hasCleared && !rec.UpdatedAt.After(cleared) {
+				return false // 按时间倒序：此后的记录都不晚于本设备清空时间
+			}
+			group := rec.Share + "\x00" + progress.DirKey(rec.Path)
+			if t, ok := hidden[group]; seen[group] || ok && !rec.UpdatedAt.After(t) {
+				return true // 已列出，或本设备已移除该目录且此后无新进度
 			}
 			f, fi, err := openInShare(shares[rec.Share], rec.Path)
 			if err != nil {
@@ -178,6 +188,36 @@ func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"items": items})
+}
+
+// DELETE /api/continue?share=&path= —— 从本设备的继续观看中移除该条目所在的「共享+目录」；
+// 无参数时清空本设备当前列表。只记录本设备的移除时间，不删除任何设备的进度；该目录此后有新进度时重新出现。
+func (s *Server) handleContinueDelete(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeError(w, CodeInternal, "进度存储不可用")
+		return
+	}
+	q := r.URL.Query()
+	var share, dir string
+	if q.Has("share") || q.Has("path") {
+		sh := s.visibleShare(r) // 不存在、不可见、锁定的加密片库：同为 404
+		if sh == nil {
+			writeError(w, CodeNotFound, "共享不存在")
+			return
+		}
+		p := q.Get("path")
+		if p == "" || !fsx.ValidRel(p) {
+			writeError(w, CodeBadPath, "路径非法")
+			return
+		}
+		share, dir = sh.ID, progress.DirKey(p)
+	}
+	if err := progress.Hide(r.Context(), s.Store, DeviceID(r.Context()), share, dir, time.Now()); err != nil {
+		log.Printf("移除继续观看失败: %v", err)
+		writeError(w, CodeInternal, "移除失败")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // deviceNames 返回设备 ID → 设备名（仅正式鉴权服务可用；测试用 TokenMap 时为空）。

@@ -819,3 +819,36 @@ func TestStartupCleansKeepStructure(t *testing.T) {
 		}
 	}
 }
+
+// 文件被其他程序以不共享删除的方式打开（如播放器）：返回 ErrInUse，不删除。不依赖回收站，始终运行。
+func TestShellRecyclerInUse(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "busy.mkv")
+	os.WriteFile(p, []byte("x"), 0o644)
+	f, err := os.Open(p) // Go 打开文件不带 FILE_SHARE_DELETE
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := (ShellRecycler{}).Recycle(p); !errors.Is(err, ErrInUse) {
+		t.Fatalf("err = %v, want ErrInUse", err)
+	}
+	if _, err := os.Stat(p); err != nil {
+		t.Fatal("被占用的文件不应被删除")
+	}
+}
+
+// 真实回收站：文件夹整体移入回收站。默认跳过；LFB_TEST_RECYCLE=1 时运行。
+func TestShellRecyclerRealDir(t *testing.T) {
+	if os.Getenv("LFB_TEST_RECYCLE") != "1" {
+		t.Skip("设置 LFB_TEST_RECYCLE=1 运行")
+	}
+	d := filepath.Join(t.TempDir(), "lfb-recycle-test-dir")
+	os.MkdirAll(filepath.Join(d, "sub"), 0o755)
+	os.WriteFile(filepath.Join(d, "sub", "a.txt"), []byte("x"), 0o644)
+	if err := (ShellRecycler{}).Recycle(d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(d); err == nil {
+		t.Fatal("文件夹应已移入回收站")
+	}
+}

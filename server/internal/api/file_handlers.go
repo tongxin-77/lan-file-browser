@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"lfb/server/internal/activity"
 	"lfb/server/internal/config"
 	"lfb/server/internal/fsx"
 	"lfb/server/internal/listing"
@@ -268,7 +267,7 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, download bool
 	// TransmitFile；ServeContent 仍经 response.ReadFrom 的缓冲拷贝，不额外包 writer。
 	rc := http.NewResponseController(w)
 	if !download && s.Activity != nil && media.Kind(name) == media.KindVideo { // 活跃播放（05 文档 3.4）
-		defer s.Activity.StreamStart(activity.VolumeOf(filepath.Join(sh.Path, rel)))()
+		defer s.Activity.StreamFile(filepath.Join(sh.Path, rel))()
 	}
 	http.ServeContent(w, r, name, fi.ModTime(), deadlineReader{f, rc})
 }

@@ -30,6 +30,10 @@ var (
 	procSHFileOperationW     = shell32.NewProc("SHFileOperationW")
 	errLocked                = errors.New("文件被其他程序占用")
 	errRecycleBinUnsupported = errors.New("所在硬盘没有回收站")
+
+	// 供其他包（如 /api/delete）判断 ShellRecycler.Recycle 的错误。
+	ErrInUse        = errLocked
+	ErrNoRecycleBin = errRecycleBinUnsupported
 )
 
 // openSourceRead 以“拒绝写共享”（只允许别人读）打开源文件：不跟随链接、顺序读提示（06 文档 4.2 #3、第 8 节）。
@@ -267,6 +271,22 @@ const (
 	fofNoErrorUI      = 0x0400
 )
 
+// inUse 报告 path（文件或文件夹本身）是否被其他程序以不允许删除的方式打开（如播放器）：
+// 以 DELETE 访问、全共享方式试开，共享冲突即占用。
+func inUse(path string) bool {
+	u, err := windows.UTF16PtrFromString(longPath(path))
+	if err != nil {
+		return false
+	}
+	h, err := windows.CreateFile(u, windows.DELETE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, fileFlagBackupSem|fileFlagOpenReparse, 0)
+	if err != nil {
+		return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION)
+	}
+	windows.CloseHandle(h)
+	return false
+}
+
 func (ShellRecycler) Recycle(path string) error {
 	if !filepath.IsAbs(path) {
 		return errors.New("回收站需要绝对路径")
@@ -275,7 +295,22 @@ func (ShellRecycler) Recycle(path string) error {
 	if err != nil {
 		return err
 	}
-	if !recycleBinFits(path, fi.Size()) {
+	if inUse(path) {
+		return errLocked
+	}
+	size := fi.Size()
+	if fi.IsDir() { // 文件夹按内部文件总大小判断回收站容量
+		size = 0
+		filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				if i, err := d.Info(); err == nil {
+					size += i.Size()
+				}
+			}
+			return nil
+		})
+	}
+	if !recycleBinFits(path, size) {
 		return errRecycleBinUnsupported
 	}
 	from, err := syscall.UTF16FromString(path)
@@ -285,6 +320,9 @@ func (ShellRecycler) Recycle(path string) error {
 	from = append(from, 0) // 双 NUL 结尾
 	op := shFileOpStruct{wFunc: foDelete, pFrom: &from[0], fFlags: fofAllowUndo | fofNoConfirmation | fofSilent | fofNoErrorUI}
 	if r, _, _ := procSHFileOperationW.Call(uintptr(unsafe.Pointer(&op))); r != 0 || op.fAnyOperationsAborted != 0 {
+		if r == uintptr(windows.ERROR_SHARING_VIOLATION) || r == uintptr(windows.ERROR_LOCK_VIOLATION) {
+			return errLocked // 如文件夹内有文件被占用
+		}
 		return fmt.Errorf("移入回收站失败（%#x）", r)
 	}
 	if _, err := os.Lstat(path); err == nil {

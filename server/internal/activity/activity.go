@@ -6,6 +6,7 @@ package activity
 
 import (
 	"context"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -40,6 +41,8 @@ type Tracker struct {
 
 	streams  map[string]int       // 卷键 → 进行中的视频流数
 	progress map[string]time.Time // 卷键 → 最近一次进度上报
+	files    map[string]int       // 文件键 → 进行中的视频流数（StreamFile）
+	fileProg map[string]time.Time // 文件键 → 最近一次进度上报（ProgressFile）
 	names    map[string]string    // 卷键 → 原始卷标识（首次出现的写法）
 	idleFrom time.Time            // 最近一次“活跃结束”的时刻（流结束 / 进度窗口到期）
 	awake    bool
@@ -56,7 +59,8 @@ func New(o Options) *Tracker {
 		o.ProgressWindow = DefaultProgressWindow
 	}
 	return &Tracker{now: o.Now, keeper: o.Keeper, resumeAfter: o.ResumeAfter, window: o.ProgressWindow,
-		streams: map[string]int{}, progress: map[string]time.Time{}, names: map[string]string{}}
+		streams: map[string]int{}, progress: map[string]time.Time{}, names: map[string]string{},
+		files: map[string]int{}, fileProg: map[string]time.Time{}}
 }
 
 func volKey(v string) string { return strings.ToLower(v) }
@@ -100,6 +104,64 @@ func (t *Tracker) Progress(volume string) {
 		t.idleFrom = end
 	}
 	t.updateLocked()
+}
+
+// fileKey 为文件路径的比较键（清理、转小写）。
+func fileKey(p string) string { return strings.ToLower(filepath.Clean(p)) }
+
+// StreamFile 同 StreamStart（按 file 所在卷计入），并按文件记录，供 Playing 判断。
+func (t *Tracker) StreamFile(file string) (end func()) {
+	k := fileKey(file)
+	endVol := t.StreamStart(VolumeOf(file))
+	t.mu.Lock()
+	t.files[k]++
+	t.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			t.mu.Lock()
+			if t.files[k]--; t.files[k] <= 0 {
+				delete(t.files, k)
+			}
+			t.mu.Unlock()
+			endVol()
+		})
+	}
+}
+
+// ProgressFile 同 Progress（按 file 所在卷计入），并按文件记录，供 Playing 判断。
+func (t *Tracker) ProgressFile(file string) {
+	t.Progress(VolumeOf(file))
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := t.now()
+	for k, at := range t.fileProg { // 顺带清理过期记录
+		if now.Sub(at) >= t.window {
+			delete(t.fileProg, k)
+		}
+	}
+	t.fileProg[fileKey(file)] = now
+}
+
+// Playing 报告路径 p 本身或其下（p 为文件夹时）是否有正在播放的文件（大小写不敏感）：
+// 有进行中的视频流，或窗口内（默认 60 秒）有进度上报。
+func (t *Tracker) Playing(p string) bool {
+	k := fileKey(p)
+	under := func(f string) bool { return f == k || strings.HasPrefix(f, strings.TrimSuffix(k, `\`)+`\`) }
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for f := range t.files {
+		if under(f) {
+			return true
+		}
+	}
+	now := t.now()
+	for f, at := range t.fileProg {
+		if now.Sub(at) < t.window && under(f) {
+			return true
+		}
+	}
+	return false
 }
 
 // Active 报告当前是否有任何活跃播放。

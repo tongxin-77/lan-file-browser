@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -278,5 +279,126 @@ func TestContinueWatchedWithoutNext(t *testing.T) {
 	items := getContinue(t, s, "tok2")
 	if len(items) != 1 || items[0].Path != "第1集.mkv" || items[0].Next == nil || items[0].Next.Path != "第2集.mkv" {
 		t.Fatalf("continue = %+v", items)
+	}
+}
+
+func deleteContinue(t *testing.T, s *Server, tok, target string, hdr ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := httptest.NewRequest("DELETE", target, nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	for i := 0; i+1 < len(hdr); i += 2 {
+		r.Header.Set(hdr[i], hdr[i+1])
+	}
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	return w
+}
+
+func continuePaths(t *testing.T, s *Server, tok string, hdr ...string) string {
+	t.Helper()
+	w := fget(t, s, tok, "/api/continue", hdr...)
+	var body struct{ Items []continueItem }
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+		t.Fatalf("continue: %d %s", w.Code, w.Body)
+	}
+	var got []string
+	for _, it := range body.Items {
+		got = append(got, it.Share+":"+it.Path)
+	}
+	return strings.Join(got, " ")
+}
+
+// 移除单条只影响本设备；同目录不由较早记录补位；该目录有更新的进度（任何设备）后重新出现。
+func TestContinueRemoveOne(t *testing.T) {
+	s, _ := newProgressServer(t)
+	mustPost(t, s, "tok1", "pub", "第1集.mkv", 30, 100)
+	time.Sleep(5 * time.Millisecond)
+	mustPost(t, s, "tok1", "pub", "Z目录/x.mp4", 30, 100)
+	time.Sleep(5 * time.Millisecond)
+	mustPost(t, s, "tok2", "pub", "第2集.mkv", 40, 100)
+
+	if w := deleteContinue(t, s, "tok2", "/api/continue?share=pub&path="+url.QueryEscape("第2集.mkv")); w.Code != 204 {
+		t.Fatalf("移除: %d %s", w.Code, w.Body)
+	}
+	if got := continuePaths(t, s, "tok2"); got != "pub:Z目录/x.mp4" {
+		t.Fatalf("dev2 移除后 = %q", got)
+	}
+	if got := continuePaths(t, s, "tok1"); got != "pub:第2集.mkv pub:Z目录/x.mp4" {
+		t.Fatalf("不应影响其他设备: %q", got)
+	}
+	// 重复移除、移除没有记录的目录均成功
+	if w := deleteContinue(t, s, "tok2", "/api/continue?share=pub&path="+url.QueryEscape("第2集.mkv")); w.Code != 204 {
+		t.Fatalf("重复移除: %d", w.Code)
+	}
+	time.Sleep(5 * time.Millisecond)
+	mustPost(t, s, "tok1", "pub", "第1集.mkv", 50, 100) // 其他设备在该目录有了新进度
+	if got := continuePaths(t, s, "tok2"); got != "pub:第1集.mkv pub:Z目录/x.mp4" {
+		t.Fatalf("新进度后应重新出现: %q", got)
+	}
+}
+
+func TestContinueRemoveErrors(t *testing.T) {
+	s, _ := newVaultServer(t)
+	mustPost(t, s, "tok1", "pub", "第1集.mkv", 30, 100)
+	for _, c := range []struct {
+		target string
+		status int
+		code   string
+	}{
+		{"/api/continue?share=nosuch&path=a.mkv", 404, CodeNotFound},
+		{"/api/continue?share=priv&path=a.mkv", 404, CodeNotFound}, // dev2 不可见
+		{"/api/continue?share=pub&path=", 400, CodeBadPath},
+		{"/api/continue?share=pub&path=../a.mkv", 400, CodeBadPath},
+		{"/api/continue?share=pub", 400, CodeBadPath},
+	} {
+		wantErr(t, deleteContinue(t, s, "tok2", c.target), c.status, c.code, c.target)
+	}
+	// 锁定的加密片库与不存在完全相同；解锁后可移除
+	for _, hdr := range [][]string{nil, {"X-Vault", "bogus"}} {
+		got := deleteContinue(t, s, "tok1", "/api/continue?share=sec&path=a.mkv", hdr...)
+		want := deleteContinue(t, s, "tok1", "/api/continue?share=nosuch&path=a.mkv", hdr...)
+		if got.Code != 404 || got.Body.String() != want.Body.String() {
+			t.Errorf("锁定片库: %d %s, 不存在时 %s", got.Code, got.Body, want.Body)
+		}
+	}
+	sess := mustUnlock(t, s, "tok1", "1234")
+	if w := deleteContinue(t, s, "tok1", "/api/continue?share=sec&path=a.mkv", "X-Vault", sess); w.Code != 204 {
+		t.Errorf("解锁后移除: %d %s", w.Code, w.Body)
+	}
+	if w := deleteContinue(t, s, "", "/api/continue"); w.Code != 401 {
+		t.Errorf("无 token: %d", w.Code)
+	}
+}
+
+// 清空只影响本设备（含加密片库条目）；之后有新进度的目录重新出现。
+func TestContinueClear(t *testing.T) {
+	s, _ := newVaultServer(t)
+	mustPost(t, s, "tok1", "pub", "第1集.mkv", 30, 100)
+	sess := mustUnlock(t, s, "tok1", "1234")
+	writeFiles(t, s.Config.Get().Shares[0].Path, "片库/v.mkv")
+	r := httptest.NewRequest("POST", "/api/progress", strings.NewReader(progBody("sec", "片库/v.mkv", 10, 100)))
+	r.Header.Set("Authorization", "Bearer tok1")
+	r.Header.Set("X-Vault", sess)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 204 {
+		t.Fatalf("片库进度: %d %s", w.Code, w.Body)
+	}
+	time.Sleep(5 * time.Millisecond)
+	mustPost(t, s, "tok2", "pub", "Z目录/x.mp4", 30, 100)
+
+	if w := deleteContinue(t, s, "tok1", "/api/continue"); w.Code != 204 { // 锁定状态下清空
+		t.Fatalf("清空: %d %s", w.Code, w.Body)
+	}
+	if got := continuePaths(t, s, "tok1", "X-Vault", sess); got != "" {
+		t.Fatalf("清空后（含片库）应为空: %q", got)
+	}
+	if got := continuePaths(t, s, "tok2"); got != "pub:Z目录/x.mp4 pub:第1集.mkv" {
+		t.Fatalf("不应影响其他设备: %q", got)
+	}
+	time.Sleep(5 * time.Millisecond)
+	mustPost(t, s, "tok2", "pub", "第2集.mkv", 30, 100)
+	if got := continuePaths(t, s, "tok1"); got != "pub:第2集.mkv" {
+		t.Fatalf("新进度后应重新出现: %q", got)
 	}
 }

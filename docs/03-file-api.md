@@ -90,10 +90,10 @@ flowchart LR
 
 | 权限（管理页开关） | 字段 | 控制的接口 |
 | ---- | ---- | ---- |
-| 浏览与播放（始终开） | — | shares / list / file / thumb / next / subtitles / progress / continue |
+| 浏览与播放（始终开） | — | shares / list / file / thumb / next / subtitles / progress / continue（含 `DELETE`） |
 | 下载到手机 | `download` | `/api/download`（及 App 的下载按钮） |
 | 从手机上传 | `upload` | `/api/upload` |
-| 删除与重命名 | `modify` | `/api/rename`、`/api/delete` |
+| 删除与重命名 | `modify`（`config.json` 与管理页接口中为 `perms.delete`，管理页开关“允许手机删除（移入回收站）”，默认关） | `/api/rename`（未实现）、`/api/delete` |
 | 显示隐藏文件 | `showHidden` | 影响 2.4 过滤（无权时隐藏项按 404 处理，不是 403） |
 
 - 不可见共享一律 `404`，不用 `403`，避免泄露其存在；`403` 仅用于「共享可见但该操作无权限」。
@@ -194,7 +194,7 @@ flowchart LR
 | `episode` | 同目录字幕中集号与视频相同（字幕组文件名与视频不一致时） | `[字幕组] Show [12].chs.ass` |
 | `season` | 字幕只标季不标集，剧名（规范化后）与季号和视频相同（视频未标季视为第 1 季） | 视频 `Show.S01E12.mkv` 时的 `Show.S01.chs.srt` |
 
-### 4.8 观看进度：POST /api/progress、GET /api/continue
+### 4.8 观看进度：POST /api/progress、GET /api/continue、DELETE /api/continue
 
 服务端按设备存储，同时提供**家庭共享进度**：手机看到第 12 集，电视「继续观看」能接着看。
 
@@ -202,9 +202,12 @@ flowchart LR
 | ---- | ---- |
 | `POST /api/progress` | Body `{share, path, position, duration}`（秒）。App 播放中每 10 秒、暂停、退出时上报。返回 `204` |
 | `GET /api/continue` | 继续观看列表（最多 20 条）：按「共享+目录」聚合，取所有设备中最近一条；字段 `share, path, name, position, duration, watched, updatedAt, deviceName`（`deviceName` 为上报该记录的设备名）；`watched` 为真时附 `next`（4.6 返回的 `item`，含 `path`），无下一集则该条目不出现 |
+| `DELETE /api/continue?share=<id>&path=<条目的 path>` | 从**本设备**的继续观看中移除该条目（即其「共享+目录」分组）。返回 `204`（重复移除、该目录无记录也是 `204`）。共享不存在 / 不可见 / 加密片库无会话 → `404 NOT_FOUND`（与不存在相同）；`path` 缺失、为空或违反 2.2 → `400 BAD_PATH` |
+| `DELETE /api/continue` | 无参数：清空**本设备**当前的继续观看列表（含此时锁定、未显示的加密片库条目）。返回 `204` |
 
 - 看完判定：`position ≥ 90% × duration`，或 `duration ≥ 10 分钟` 且 `duration − position < 120 秒`（不足 10 分钟的短视频只按 90% 判定）。
 - 仅返回本设备当前可见共享内的记录（不泄露不可见共享）。
+- 移除 / 清空只是本设备隐藏：不删除任何设备的进度，其他设备不受影响。服务端按设备记录移除时间（表 `continue_hidden(device_id, share_id, dir_key, hidden_at)`，迁移 101；清空记为 `share_id = dir_key = ''`）；该目录此后有**任何设备**的新进度（`updatedAt` 晚于移除时间）时重新出现。被移除的分组不会由同目录较早的记录补位。
 - 存储：SQLite（`modernc.org/sqlite`，纯 Go，无需 cgo），`%APPDATA%\LanFileBrowser\data.db`。表 `progress(device_id, share_id, path_key, path, position, duration, watched, updated_at)`，主键 `(device_id, share_id, path_key)`；`path_key` 为 Go 侧 `strings.ToLower` 结果（SQLite `NOCASE` 只处理 ASCII）。文件改名/删除后的孤儿记录不主动清理，读取时跳过。
 - 01 文档中的 `devices.json` 也可迁入同库，由实现阶段决定。
 
@@ -224,10 +227,39 @@ flowchart LR
 
 | 接口 | Body | 说明 | 错误 |
 | ---- | ---- | ---- | ---- |
-| rename | `{share, path, newName}` | 仅同目录改名；`newName` 为单段，按 2.2 校验；目标已存在 → `CONFLICT`（仅大小写变化允许） | `BAD_PATH` `NOT_FOUND` `CONFLICT` `FORBIDDEN` |
-| delete | `{share, paths: []}` | 默认**移入 Windows 回收站**（`IFileOperation`，`FOFX_RECYCLEONDELETE`），不永久删除；所在盘无回收站（如部分 U 盘）时返回失败而非静默永久删除 | `NOT_FOUND` `FORBIDDEN` |
+| rename（未实现） | `{share, path, newName}` | 仅同目录改名；`newName` 为单段，按 2.2 校验；目标已存在 → `CONFLICT`（仅大小写变化允许） | `BAD_PATH` `NOT_FOUND` `CONFLICT` `FORBIDDEN` |
+| delete（已实现） | `{share, paths: []}`，`Content-Type: application/json`，1–1000 个路径 | 文件、文件夹都可删；**移入 Windows 回收站**（`SHFileOperationW`，`FOF_ALLOWUNDO`，与整理库共用 `organize.ShellRecycler`），不永久删除 | 见下 |
 
-回收站 API 只接受绝对路径：先经 `os.Root` 打开并通过第 3 层校验取得最终路径，关闭句柄后再交给 Shell（存在极短 TOCTOU 窗口，局域网家庭场景可接受）。
+delete 的请求级错误用第 7 节统一格式，此时**不删除任何文件**：
+
+| 情况 | 响应 |
+| ---- | ---- |
+| 非 JSON、`paths` 为空或超过 1000 | `400 BAD_PATH` |
+| 共享不存在 / 不可见 / 加密片库无有效 `X-Vault` 会话 | `404 NOT_FOUND`（与不存在完全相同） |
+| 共享离线 | `503 SHARE_OFFLINE` |
+| 无 `modify` 权限 | `403 FORBIDDEN` |
+
+之后逐个路径处理（互不影响）：**全部成功 → `204`**；有失败 → **`200`** + 失败列表（成功的照常删除）：
+
+```json
+{"failed":[
+  {"path":"第1集.mkv","code":"IN_USE","message":"正在播放，不能删除"},
+  {"path":".secret","code":"NOT_FOUND","message":"文件不存在"}
+]}
+```
+
+| 单项 `code` | 场景 |
+| ---- | ---- |
+| `BAD_PATH` | 共享根（`""`）、违反 2.2 |
+| `NOT_FOUND` | 不存在、链接逃逸、始终隐藏项、无「显示隐藏文件」权限时的隐藏项（规则同 2.4） |
+| `IN_USE` | 该文件（或文件夹内某文件）正在播放：有进行中的 `/api/file` 视频流或 60 秒内有 `/api/progress` 上报（任一设备、按真实文件路径）；或被其他程序以不允许删除的方式打开 |
+| `NO_RECYCLE_BIN` | 所在盘没有回收站（U 盘、网络盘）、该盘设为“不移到回收站”，或超过回收站容量——不删除，不会退化为永久删除 |
+| `SHARE_OFFLINE` | 处理过程中硬盘断开 |
+| `INTERNAL` | 回收站操作其他失败 |
+
+- 回收站 API 只接受绝对路径：先经 `fsx`（三层校验）+ 隐藏项规则确认路径可见，关闭句柄后把「共享根真实路径 + 请求路径」交给 Shell（存在极短 TOCTOU 窗口，局域网家庭场景可接受）。路径末段是链接 / 联接时删除的是链接本身。
+- 删除后列表 `ETag` 由内容计算，自然变化；进度记录、缩略图缓存不主动清理（孤儿进度读取时跳过，缩略图键含 mtime/size）。
+- 日志记录设备、共享 ID 与路径；加密片库只记共享 ID，不记文件名（04 第 7 节 #10）。
 
 ## 5. 实时性
 
@@ -257,6 +289,8 @@ flowchart LR
 | `FORBIDDEN` | 403 | 仅用于可见共享内的操作无权限 |
 | `BAD_PATH` | 400 | 违反 2.2 规则、参数非法 |
 | `CONFLICT` | 409 | 重命名目标已存在 |
+| `IN_USE` | 409 | 删除：文件正在播放或被其他程序占用（仅出现在 4.10 的 `failed` 中） |
+| `NO_RECYCLE_BIN` | 409 | 删除：所在盘没有回收站或放不下（仅出现在 4.10 的 `failed` 中） |
 | `TOO_LARGE` | 413 | 上传超过单文件上限 |
 | `SHARE_OFFLINE` | 503 | 共享路径不存在（如硬盘未连接） |
 
@@ -299,7 +333,7 @@ func (s *Share) Open(rel string) (*os.File, error) {
 | ---- | ---- |
 | P1 | `/api/shares`、`/api/list`（含 ETag）、`/api/file`、`/api/download`、路径安全三层 + 链接实测用例、权限校验、统一错误 |
 | P2 | `/api/next`（同目录）、`/api/subtitles`、`/api/progress`、`/api/continue`、`/api/thumb` |
-| P3 | `/api/upload`、`/api/rename`、`/api/delete`（回收站）、`/api/events`（SSE）、跨季下一集 |
+| P3 | `/api/upload`、`/api/rename`、~~`/api/delete`（回收站）~~（已实现）、`/api/events`（SSE）、跨季下一集 |
 
 ## 10. 待确认问题
 
