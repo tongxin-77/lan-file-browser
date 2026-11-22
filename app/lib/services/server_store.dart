@@ -44,10 +44,6 @@ class ServerStore {
       if (await _token(s.serverId) case final t?) (s, t),
   ];
 
-  /// 设为上次使用（切换电脑，不删除其他已保存的）。
-  Future<void> setLast(String serverId) async =>
-      (await SharedPreferences.getInstance()).setString(_kLast, serverId);
-
   /// 读取失败（如 Keystore 异常）按无 token 处理，不抛出。
   Future<String?> _token(String serverId) async {
     try {

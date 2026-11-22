@@ -183,15 +183,6 @@ void main() {
     test('保存时合并已知地址，切换电脑不删除其他已保存的', () async {
       await serverStore.save(
         const SavedServer(
-          serverId: 's1',
-          name: '书房电脑',
-          lastIp: '10.0.0.1',
-          port: 8686,
-          ips: ['10.0.0.1', '192.168.1.5'],
-        ),
-      );
-      await serverStore.save(
-        const SavedServer(
           serverId: 's2',
           name: '客厅电脑',
           lastIp: '10.0.0.9',
@@ -199,7 +190,15 @@ void main() {
         ),
         token: 'tok2',
       );
-      await serverStore.setLast('s1');
+      await serverStore.save(
+        const SavedServer(
+          serverId: 's1',
+          name: '书房电脑',
+          lastIp: '10.0.0.1',
+          port: 8686,
+          ips: ['10.0.0.1', '192.168.1.5'],
+        ),
+      );
       final (s, _) = (await serverStore.lastServer())!;
       expect(s.candidates, ['10.0.0.1', '192.168.1.5']);
       await serverStore.save(s.withAddress('192.168.1.7'));

@@ -13,7 +13,11 @@ import '../theme.dart';
 /// 只有电脑明确表示 token 无效才清凭据回连接页（由 onUnauthorized 处理）；
 /// 其他失败保留凭据，停在“正在连接”并按退避自动重试。
 class StartupPage extends StatefulWidget {
-  const StartupPage({super.key});
+  const StartupPage({super.key, this.target});
+
+  /// 连接页点选的已保存电脑（地址可能是刚发现的）；null 表示上次使用的电脑。
+  /// 连接成功才保存地址并设为当前电脑，失败不改任何已保存信息。
+  final (SavedServer, String)? target;
 
   @override
   State<StartupPage> createState() => _StartupPageState();
@@ -58,7 +62,7 @@ class _StartupPageState extends State<StartupPage> {
   }
 
   Future<void> _start() async {
-    final last = await serverStore.lastServer();
+    final last = widget.target ?? await serverStore.lastServer();
     if (last == null) {
       showConnectPage();
       return;
@@ -78,8 +82,10 @@ class _StartupPageState extends State<StartupPage> {
     final client = clientFor(server, _token!);
     try {
       await client.reconnect();
+      final now = server.withAddress(client.host, client.port);
+      if (widget.target != null) await serverStore.save(now);
       if (!mounted) return;
-      openHome(server.withAddress(client.host, client.port), _token!);
+      openHome(now, _token!);
     } on ApiException catch (e) {
       // 401 已由 onUnauthorized 清凭据并跳转连接页
       if (!e.isUnauthorized) _fail(e.message);

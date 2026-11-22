@@ -31,8 +31,8 @@ class _ConnectPageState extends State<ConnectPage> {
   bool _busy = false;
   String? _error;
 
-  /// 已保存的电脑：点即用已保存凭据连接，无需重新配对。
-  List<SavedServer> _saved = const [];
+  /// 已保存的电脑（及 token）：点即用已保存凭据连接，无需重新配对。
+  List<(SavedServer, String)> _saved = const [];
 
   /// 局域网自动发现结果；null 表示正在扫描（01 §2.2）。
   List<DiscoveredServer>? _found;
@@ -45,7 +45,7 @@ class _ConnectPageState extends State<ConnectPage> {
   void initState() {
     super.initState();
     serverStore.paired().then((list) {
-      if (mounted) setState(() => _saved = [for (final (s, _) in list) s]);
+      if (mounted) setState(() => _saved = list);
     });
     _discover();
   }
@@ -56,20 +56,18 @@ class _ConnectPageState extends State<ConnectPage> {
     if (mounted) setState(() => _found = list);
   }
 
-  /// 已配对的直接用已保存凭据连接（顺便更新地址）；未配对的填好地址等输 PIN。
+  /// 已配对的直接用已保存凭据连接发现到的地址（连上才保存）；未配对的填好地址等输 PIN。
   Future<void> _pick(DiscoveredServer d) async {
-    final saved = _saved.where((s) => s.serverId == d.id).firstOrNull;
-    if (saved != null) {
-      await serverStore.save(
-        SavedServer(
-          serverId: d.id,
-          name: saved.name,
-          lastIp: d.from,
-          port: d.port,
-          ips: d.ips,
-        ),
+    final saved = _saved.where((p) => p.$1.serverId == d.id).firstOrNull;
+    if (saved case (final s, final token)) {
+      final found = SavedServer(
+        serverId: s.serverId,
+        name: s.name,
+        lastIp: d.from,
+        port: d.port,
+        ips: {...d.ips, ...s.candidates}.toList(),
       );
-      return _useSaved(saved);
+      return _useSaved((found, token));
     }
     setState(() {
       _picked = d;
@@ -79,11 +77,10 @@ class _ConnectPageState extends State<ConnectPage> {
     _pinFocus.requestFocus();
   }
 
-  Future<void> _useSaved(SavedServer s) async {
-    await serverStore.setLast(s.serverId);
-    if (!mounted) return;
+  /// 只切到“正在连接”页；连接成功后才保存并设为当前电脑，失败不改任何已保存信息。
+  void _useSaved((SavedServer, String) target) {
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const StartupPage()),
+      MaterialPageRoute<void>(builder: (_) => StartupPage(target: target)),
     );
   }
 
@@ -211,7 +208,7 @@ class _ConnectPageState extends State<ConnectPage> {
                       '已保存的电脑',
                       style: TextStyle(color: NightColors.ash),
                     ),
-                    for (final s in _saved)
+                    for (final (s, token) in _saved)
                       ListTile(
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.computer_outlined),
@@ -221,7 +218,7 @@ class _ConnectPageState extends State<ConnectPage> {
                           style: const TextStyle(color: NightColors.ash),
                         ),
                         enabled: !_busy,
-                        onTap: () => _useSaved(s),
+                        onTap: () => _useSaved((s, token)),
                       ),
                   ],
                   const SizedBox(height: 20),
@@ -255,7 +252,7 @@ class _ConnectPageState extends State<ConnectPage> {
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.computer_outlined),
                       title: Text('${d.name} · ${d.from}'),
-                      trailing: _saved.any((s) => s.serverId == d.id)
+                      trailing: _saved.any((p) => p.$1.serverId == d.id)
                           ? const Text(
                               '已配对',
                               style: TextStyle(color: NightColors.moss),
