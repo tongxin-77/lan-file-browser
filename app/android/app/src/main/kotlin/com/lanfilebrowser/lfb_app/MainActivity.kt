@@ -2,6 +2,7 @@ package com.lanfilebrowser.lfb_app
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -17,6 +18,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.net.Inet4Address
+import kotlin.math.roundToInt
 
 class MainActivity : FlutterActivity() {
     private var wifiLock: WifiManager.WifiLock? = null
@@ -58,6 +60,17 @@ class MainActivity : FlutterActivity() {
                         }
                         result.success(null)
                     }
+                    // 播放器手势：只调本窗口亮度、媒体音量（docs/05-playback.md 4.5）
+                    "getBrightness" -> result.success(currentBrightness())
+                    "setBrightness" -> {
+                        setBrightness((call.arguments as Number).toFloat())
+                        result.success(null)
+                    }
+                    "getVolume" -> result.success(currentVolume())
+                    "setVolume" -> {
+                        setVolume((call.arguments as Number).toDouble())
+                        result.success(null)
+                    }
                     "canInstallPackages" -> result.success(
                         Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
                             packageManager.canRequestPackageInstalls()
@@ -84,6 +97,42 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    // 窗口未单独设置亮度（-1）时读系统亮度；多数机型范围 0–255，部分机型更大或非线性，仅作起点
+    private fun currentBrightness(): Double {
+        val b = window.attributes.screenBrightness
+        if (b >= 0) return b.toDouble()
+        val sys = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128)
+        return (sys / 255.0).coerceIn(0.0, 1.0)
+    }
+
+    private fun setBrightness(value: Float) {
+        val lp = window.attributes
+        lp.screenBrightness = if (value < 0) {
+            WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        } else {
+            value.coerceIn(0.01f, 1f)
+        }
+        window.attributes = lp
+    }
+
+    private fun currentVolume(): Double {
+        val am = getSystemService(AudioManager::class.java) ?: return 0.0
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        return if (max > 0) am.getStreamVolume(AudioManager.STREAM_MUSIC).toDouble() / max else 0.0
+    }
+
+    // flags = 0：不弹系统音量条，由播放器显示自己的指示条；勿扰模式下可能抛 SecurityException
+    private fun setVolume(value: Double) {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val index = (value * max).roundToInt().coerceIn(0, max)
+        if (index == am.getStreamVolume(AudioManager.STREAM_MUSIC)) return
+        try {
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, index, 0)
+        } catch (ignored: SecurityException) {
+        }
     }
 
     // 经 FileProvider 把缓存目录 apk/ 下的安装包交给系统安装器（docs/02-release.md 5.2）

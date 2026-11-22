@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:media_kit/media_kit.dart';
@@ -13,6 +14,7 @@ import '../models/file_item.dart';
 import '../models/subtitle.dart';
 import '../services/orientation.dart';
 import '../services/platform.dart';
+import '../services/player_gestures.dart';
 import '../services/playback.dart';
 import '../theme.dart';
 import '../widgets/file_tile.dart';
@@ -106,6 +108,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   /// 倍速：切集、续播保持；不持久化，下次打开播放器为 1.0×。
   double _rate = 1.0;
+
+  // 滑动手势（05 §4.5）：起点、类别、起始值（秒或 0…1）、当前值
+  Offset _panStart = Offset.zero;
+  Offset _panDelta = Offset.zero;
+  PlayerGesture? _gesture; // null = 尚未判定方向
+  double? _gestureFrom; // 亮度/音量起始值异步取得前为 null
+  double _gestureValue = 0;
 
   bool _drawer = false;
   List<PathItem>? _episodes;
@@ -522,6 +531,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _reporter.flush(_resumeAt, _duration); // 退出时上报
     WakelockPlus.disable();
     PlatformService.releaseWifiLock();
+    PlatformService.setBrightness(-1); // 恢复跟随系统亮度
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _player.dispose();
@@ -549,6 +559,138 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _scheduleHide();
   }
 
+  // ---- 滑动手势 ----
+
+  void _onPanStart(DragStartDetails d) {
+    _panStart = d.localPosition;
+    _panDelta = Offset.zero;
+    // 片尾卡片、选集抽屉、失败面板显示时不响应，避免误触
+    final blocked =
+        _upNext.phase == UpNextPhase.counting || _drawer || _failure != null;
+    _gesture = blocked ? PlayerGesture.none : null;
+    _gestureFrom = null;
+  }
+
+  void _onPanUpdate(DragUpdateDetails d) {
+    final size = MediaQuery.sizeOf(context);
+    _panDelta += d.delta;
+    if (_gesture == null) {
+      final g = classifyGesture(_panStart, _panDelta, size);
+      _gesture = g;
+      switch (g) {
+        case PlayerGesture.seek:
+          _gestureFrom = _position.inMilliseconds / 1000;
+        case PlayerGesture.brightness:
+          PlatformService.getBrightness().then(_setGestureFrom);
+        case PlayerGesture.volume:
+          PlatformService.getVolume().then(_setGestureFrom);
+        case PlayerGesture.none:
+      }
+    }
+    final from = _gestureFrom;
+    if (from == null) return;
+    switch (_gesture) {
+      case PlayerGesture.seek:
+        final max = _duration.inMilliseconds / 1000;
+        if (max <= 0) return;
+        final v = seekTarget(
+          from: from,
+          dx: _panDelta.dx,
+          width: size.width,
+          duration: max,
+        );
+        setState(() {
+          _gestureValue = v;
+          _dragSeconds = v; // 控制栏可见时进度条同步，且拖动中不自动隐藏
+        });
+      case PlayerGesture.brightness:
+        final v = adjustLevel(from, _panDelta.dy, size.height);
+        setState(() => _gestureValue = v);
+        PlatformService.setBrightness(v);
+      case PlayerGesture.volume:
+        final v = adjustLevel(from, _panDelta.dy, size.height);
+        setState(() => _gestureValue = v);
+        PlatformService.setVolume(v);
+      default:
+    }
+  }
+
+  void _setGestureFrom(double? v) {
+    if (!mounted || v == null) return;
+    _gestureFrom = v;
+    setState(() => _gestureValue = v);
+  }
+
+  void _onPanEnd([Object? _]) {
+    final g = _gesture;
+    final hadValue = _gestureFrom != null;
+    setState(() {
+      _gesture = null;
+      _gestureFrom = null;
+      if (g == PlayerGesture.seek) _dragSeconds = null;
+    });
+    if (g == PlayerGesture.seek && hadValue && _duration > Duration.zero) {
+      _seek(_gestureValue);
+    }
+  }
+
+  /// 手势进行中的居中指示：拖动进度显示“目标 / 总长”与相对变化；亮度/音量显示指示条。
+  Widget? _gestureIndicator() {
+    final g = _gesture;
+    final from = _gestureFrom;
+    if (from == null || g == null || g == PlayerGesture.none) return null;
+    const numStyle = TextStyle(fontFeatures: [FontFeature.tabularFigures()]);
+    if (g == PlayerGesture.seek) {
+      final target = Duration(milliseconds: (_gestureValue * 1000).round());
+      return _pill(
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${formatDuration(target)} / ${formatDuration(_duration)}',
+              style: numStyle.copyWith(fontSize: 20),
+            ),
+            Text(
+              formatSeekDelta(_gestureValue - from),
+              style: numStyle.copyWith(color: NightColors.wick),
+            ),
+          ],
+        ),
+      );
+    }
+    final brightness = g == PlayerGesture.brightness;
+    return _pill(
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            brightness ? Icons.brightness_6 : Icons.volume_up,
+            color: NightColors.moon,
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 120,
+            child: LinearProgressIndicator(
+              value: _gestureValue,
+              minHeight: 4,
+              color: NightColors.wick,
+              backgroundColor: NightColors.seam,
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 40,
+            child: Text(
+              '${(_gestureValue * 100).round()}%',
+              style: numStyle,
+              textAlign: TextAlign.end,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -560,6 +702,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: _toggleControls,
+            dragStartBehavior: DragStartBehavior.down, // 起点取按下处，用于边缘与左右半屏判定
+            onPanStart: _onPanStart,
+            onPanUpdate: _onPanUpdate,
+            onPanEnd: _onPanEnd,
+            onPanCancel: _onPanEnd,
           ),
           if (_buffering && !_reconnecting && _failure == null)
             const Center(child: CircularProgressIndicator()),
@@ -569,6 +716,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           if (_controls) ..._controlsOverlay(),
           if (_upNext.phase == UpNextPhase.counting) ..._upNextOverlay(),
           if (_drawer) _episodeDrawer(),
+          if (_gestureIndicator() case final indicator?)
+            IgnorePointer(child: Center(child: indicator)),
         ],
       ),
     );

@@ -87,6 +87,42 @@ class PlatformService {
     }
   }
 
+  /// 本 App 窗口当前亮度 0…1（未单独设置时为系统亮度的近似值）；失败为 null。
+  static Future<double?> getBrightness() async {
+    try {
+      return await _channel.invokeMethod<double>('getBrightness');
+    } on Exception {
+      return null;
+    }
+  }
+
+  /// 只调本 App 窗口亮度（screenBrightness）；传负数恢复跟随系统。
+  static Future<void> setBrightness(double value) async {
+    try {
+      await _channel.invokeMethod<void>('setBrightness', value);
+    } on Exception {
+      // 忽略
+    }
+  }
+
+  /// 媒体音量（STREAM_MUSIC）0…1；失败为 null。
+  static Future<double?> getVolume() async {
+    try {
+      return await _channel.invokeMethod<double>('getVolume');
+    } on Exception {
+      return null;
+    }
+  }
+
+  /// 设置媒体音量 0…1，不弹系统音量条。
+  static Future<void> setVolume(double value) async {
+    try {
+      await _channel.invokeMethod<void>('setVolume', value);
+    } on Exception {
+      // 忽略
+    }
+  }
+
   /// 是否已允许本 App“安装未知应用”（Android 8+ 需用户授予）。
   static Future<bool> canInstallPackages() async {
     try {
