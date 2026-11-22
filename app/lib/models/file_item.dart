@@ -46,6 +46,9 @@ class FileItem {
   /// 服务端可生成缩略图（03 §4.5），不表示已缓存。
   final bool hasThumb;
 
+  /// 缩略图缓存版本 `ver=<mtime>_<size>`（03 §4.5）：与文件一致时服务端返回长期强缓存；旧服务端忽略。
+  String get thumbVer => '${mtime.millisecondsSinceEpoch}_$size';
+
   /// 仅视频：本设备观看进度（03 §4.2），无则 null。
   final WatchProgress? progress;
 

@@ -199,9 +199,12 @@ class LfbClient {
   Uri fileUrl(String share, String path) =>
       mediaUrl('/api/file', {'share': share, 'path': path});
 
-  /// 缩略图 URL（`?t=` 白名单接口）；[width] 为 160/320/640。
-  Uri thumbUrl(String share, String path, int width) =>
-      mediaUrl('/api/thumb', {'share': share, 'path': path, 'w': '$width'});
+  /// 缩略图 / 预览图 URL（`?t=` 白名单接口）；[width] 为 160/320/640（预览 1280/1920/2560）。
+  /// [ver] 为缓存版本（[FileItem.thumbVer]，03 §4.5），null 时不带。
+  Uri thumbUrl(String share, String path, int width, {String? ver}) => mediaUrl(
+    '/api/thumb',
+    {'share': share, 'path': path, 'w': '$width', 'ver': ?ver},
+  );
 
   /// `GET /api/next`：下一集，无则 null（03 §4.6）。
   Future<PathItem?> next(String share, String path) async {

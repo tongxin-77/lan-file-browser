@@ -207,7 +207,13 @@ class _BrowserPageState extends State<BrowserPage> {
       if (!mounted) return;
       if (failed.isEmpty) {
         if (item.hasThumb) {
-          evictServerThumbs(widget.client, widget.share.id, path, item.mtime);
+          evictServerThumbs(
+            widget.client,
+            widget.share.id,
+            path,
+            item.mtime,
+            ver: item.thumbVer,
+          );
         }
         _toast('已移入电脑的回收站');
       } else {
@@ -339,6 +345,7 @@ class _BrowserPageState extends State<BrowserPage> {
       share: widget.share.id,
       path: joinPath(_path, item.name),
       mtime: item.mtime,
+      ver: item.thumbVer,
       width: width,
       placeholder: ThumbPlaceholder(icon: kindIcon(item.kind)),
     );

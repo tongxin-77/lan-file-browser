@@ -1,14 +1,17 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:photo_view/photo_view.dart';
-import 'package:photo_view/photo_view_gallery.dart';
 
 import '../api/lfb_client.dart';
 import '../models/file_item.dart';
 import '../models/share.dart';
+import '../services/fetch_queue.dart';
 import '../services/image_saver.dart';
 import '../services/orientation.dart';
+import '../services/server_image.dart';
+import '../services/thumbs.dart';
 import '../theme.dart';
 import '../widgets/file_tile.dart';
+import '../widgets/progressive_image.dart';
 import '../widgets/thumb.dart';
 
 /// 看图（设计稿 5）：左右滑动、双指缩放、底部缩略图条与信息；共享允许下载时可保存到手机。
@@ -44,8 +47,15 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
 
   static const _stripCell = 60.0;
 
+  /// 已发出的相邻页预取（预览图）。
+  List<ServerImage> _preloads = const [];
+
+  /// 预览图已显示或失败的页（翻到这些页时立即开始预取相邻页）。
+  final _settled = <int>{};
+
   @override
   void dispose() {
+    _preload(null);
     _pages.dispose();
     _strip.dispose();
     if (_landscape) lockOrientation(landscape: false); // 离开时恢复竖屏
@@ -59,19 +69,105 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
 
   String _pathOf(FileItem f) => joinPath(widget.dir, f.name);
 
-  ImageProvider _provider(FileItem f) {
-    final url = widget.client.fileUrl(widget.share.id, _pathOf(f));
-    // 大图限制解码尺寸，避免 4000 万像素照片占满内存
-    return ResizeImage(
-      serverImageProvider(widget.client, widget.share.id, url, f.mtime),
-      width: 2560,
-      height: 2560,
-      policy: ResizeImagePolicy.fit,
+  FetchQueue get _queue => ImageStores.instance.viewerQueue;
+
+  /// 预览档位：屏幕物理像素长边向上取 1280/1920/2560。
+  int get _previewWidth => previewWidthFor(
+    WidgetsBinding.instance.platformDispatcher.implicitView?.physicalSize ??
+        Size.zero,
+  );
+
+  /// 预览图（服务端能生成缩略图的图片才有）。
+  ServerImage? _preview(FileItem f, int w) => f.hasThumb
+      ? serverImageProvider(
+          widget.client,
+          widget.share.id,
+          widget.client.thumbUrl(
+            widget.share.id,
+            _pathOf(f),
+            w,
+            ver: f.thumbVer,
+          ),
+          f.mtime,
+        )
+      : null;
+
+  ServerImage _originalImage(FileItem f) => serverImageProvider(
+    widget.client,
+    widget.share.id,
+    widget.client.fileUrl(widget.share.id, _pathOf(f)),
+    f.mtime,
+  );
+
+  /// 原图限制解码尺寸，避免 4000 万像素照片占满内存。
+  ImageProvider _original(FileItem f) => ResizeImage(
+    _originalImage(f),
+    width: 4096,
+    height: 4096,
+    policy: ResizeImagePolicy.fit,
+  );
+
+  /// 预取第 [i] 张前后各 2 张的预览图（后 1、前 1、后 2、前 2），取消不再需要的；null 全部取消。
+  void _preload(int? i) {
+    final w = _previewWidth;
+    final want = i == null
+        ? const <ServerImage>[]
+        : [
+            for (final j in [i + 1, i - 1, i + 2, i - 2])
+              if (j >= 0 && j < widget.images.length)
+                ?_preview(widget.images[j], w),
+          ];
+    for (final p in _preloads) {
+      if (!want.contains(p)) _queue.cancel(p.cacheKey);
+    }
+    _preloads = want;
+    for (final p in want) {
+      precacheImage(p, context, onError: (_, _) {});
+    }
+  }
+
+  Widget _page(int i) {
+    final f = widget.images[i];
+    final w = _previewWidth;
+    final preview = _preview(f, w);
+    // 显示中的页（含翻页途中露出的相邻页）在队列里优先，移出后取消其排队中的请求
+    final page = _progressive(i, f, w, preview);
+    return QueueRetain(
+      queue: _queue,
+      id: _originalImage(f).cacheKey,
+      child: preview == null
+          ? page
+          : QueueRetain(queue: _queue, id: preview.cacheKey, child: page),
+    );
+  }
+
+  Widget _progressive(int i, FileItem f, int w, ServerImage? preview) {
+    return ProgressiveImage(
+      key: ObjectKey(f),
+      base: f.hasThumb
+          ? cachedThumb(
+              widget.client,
+              widget.share.id,
+              _pathOf(f),
+              f.mtime,
+              ver: f.thumbVer,
+            )
+          : null,
+      preview: preview,
+      previewWidth: w,
+      original: _original(f),
+      // 当前图显示后再预取相邻图，避免抢占当前图的带宽
+      onSettled: () {
+        _settled.add(i);
+        if (mounted && i == _index) _preload(i);
+      },
+      onTapUp: () => setState(() => _chrome = !_chrome),
     );
   }
 
   void _onPage(int i) {
     setState(() => _index = i);
+    _preload(_settled.contains(i) ? i : null);
     if (_strip.hasClients) {
       _strip.animateTo(
         (i * _stripCell - 120).clamp(0.0, _strip.position.maxScrollExtent),
@@ -108,21 +204,15 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          PhotoViewGallery.builder(
-            pageController: _pages,
-            itemCount: widget.images.length,
-            onPageChanged: _onPage,
-            builder: (context, i) => PhotoViewGalleryPageOptions(
-              imageProvider: _provider(widget.images[i]),
-              minScale: PhotoViewComputedScale.contained,
-              maxScale: PhotoViewComputedScale.covered * 4,
-              onTapUp: (_, _, _) => setState(() => _chrome = !_chrome),
-              errorBuilder: (_, _, _) => const Center(
-                child: Text('图片无法显示', style: TextStyle(color: NightColors.ash)),
-              ),
+          // 与 PhotoViewGallery 相同：放大后横向拖动先平移图片，到边缘再翻页
+          PhotoViewGestureDetectorScope(
+            axis: Axis.horizontal,
+            child: PageView.builder(
+              controller: _pages,
+              itemCount: widget.images.length,
+              onPageChanged: _onPage,
+              itemBuilder: (context, i) => ClipRect(child: _page(i)),
             ),
-            loadingBuilder: (_, _) =>
-                const Center(child: CircularProgressIndicator()),
           ),
           if (_chrome) ...[_top(f), _bottom(f)],
         ],

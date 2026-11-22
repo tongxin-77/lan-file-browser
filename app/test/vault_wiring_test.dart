@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -8,6 +7,7 @@ import 'package:lfb_app/api/lfb_client.dart';
 import 'package:lfb_app/app.dart' show vaultController;
 import 'package:lfb_app/models/server.dart';
 import 'package:lfb_app/pages/home_page.dart';
+import 'package:lfb_app/services/server_image.dart';
 import 'package:lfb_app/theme.dart';
 import 'package:lfb_app/widgets/thumb.dart';
 import 'package:material_ui/material_ui.dart';
@@ -72,7 +72,7 @@ void main() {
   group('加密片库图片不写磁盘缓存', () {
     final mtime = DateTime.fromMillisecondsSinceEpoch(0);
 
-    test('加密片库用内存 NetworkImage，普通共享用 CachedNetworkImageProvider', () {
+    test('加密片库不用磁盘缓存，普通共享用磁盘缓存', () {
       final c = unlockedClient([]);
       final vault = serverImageProvider(
         c,
@@ -80,18 +80,17 @@ void main() {
         c.thumbUrl('v1', 'a.jpg', 160),
         mtime,
       );
-      expect(vault, isA<NetworkImage>());
-      expect(vault, isNot(isA<CachedNetworkImageProvider>()));
+      expect(vault.store, isNull);
       final normal = serverImageProvider(
         c,
         'k3',
         c.thumbUrl('k3', 'a.jpg', 160),
         mtime,
       );
-      expect(normal, isA<CachedNetworkImageProvider>());
+      expect(normal.store, isNotNull);
     });
 
-    testWidgets('加密片库缩略图不经 CachedNetworkImage', (tester) async {
+    testWidgets('加密片库缩略图只进内存，URL 带会话', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: ServerThumb(
@@ -104,10 +103,10 @@ void main() {
           ),
         ),
       );
-      expect(find.byType(CachedNetworkImage), findsNothing);
       final img = tester.widget<Image>(find.byType(Image));
-      expect(img.image, isA<NetworkImage>());
-      expect((img.image as NetworkImage).url, contains('v=sess'));
+      final p = img.image as ServerImage;
+      expect(p.store, isNull);
+      expect(p.url.queryParameters['v'], 'sess');
     });
   });
 
