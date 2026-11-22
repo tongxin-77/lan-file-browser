@@ -33,7 +33,8 @@ class SharePerms {
   factory SharePerms.fromJson(Map<String, dynamic> j) => SharePerms(
     download: j['download'] as bool? ?? false,
     upload: j['upload'] as bool? ?? false,
-    modify: j['modify'] as bool? ?? false,
+    // 03 文档称 modify，服务端 config 称 delete：两者都认
+    modify: (j['modify'] ?? j['delete']) as bool? ?? false,
     showHidden: j['showHidden'] as bool? ?? false,
   );
 

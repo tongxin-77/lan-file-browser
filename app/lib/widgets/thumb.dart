@@ -19,6 +19,24 @@ ImageProvider serverImageProvider(
         cacheKey: imageCacheKey(url, mtime),
       );
 
+/// 文件被删除后清掉本机各档缩略图缓存（普通共享含磁盘缓存；片库只在内存）。失败静默。
+void evictServerThumbs(
+  LfbClient client,
+  String share,
+  String path,
+  DateTime mtime,
+) {
+  for (final w in thumbWidths) {
+    final url = client.thumbUrl(share, path, w);
+    serverImageProvider(client, share, url, mtime).evict().ignore();
+    if (!client.isVaultShare(share)) {
+      CachedNetworkImageProvider.defaultCacheManager
+          .removeFile(imageCacheKey(url, mtime))
+          .ignore();
+    }
+  }
+}
+
 /// 服务端缩略图（加密片库仅内存缓存，见 [serverImageProvider]）。加载中/失败显示 [placeholder]。
 class ServerThumb extends StatelessWidget {
   const ServerThumb({

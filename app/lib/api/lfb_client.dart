@@ -255,6 +255,43 @@ class LfbClient {
         .toList();
   }
 
+  /// `DELETE /api/continue?share=&path=`：从本设备继续观看列表移除一条。
+  Future<void> removeContinue(String share, String path) async {
+    await _send(
+      'DELETE',
+      '/api/continue',
+      query: {'share': share, 'path': path},
+    );
+  }
+
+  /// `DELETE /api/continue`：清空本设备继续观看列表。
+  Future<void> clearContinue() async {
+    await _send('DELETE', '/api/continue');
+  }
+
+  /// `POST /api/delete`：移入电脑回收站（需 modify 权限，03 §4.10）。
+  /// 全部成功返回空列表；部分失败返回失败条目。
+  Future<List<({String path, String code, String message})>> deleteFiles(
+    String share,
+    List<String> paths,
+  ) async {
+    final res = await _send(
+      'POST',
+      '/api/delete',
+      body: {'share': share, 'paths': paths},
+    );
+    if (res.statusCode == 204 || res.bodyBytes.isEmpty) return const [];
+    final failed = (_json(res)['failed'] as List?) ?? const [];
+    return [
+      for (final f in failed.cast<Map>())
+        (
+          path: f['path'] as String? ?? '',
+          code: f['code'] as String? ?? '',
+          message: f['message'] as String? ?? '删除失败',
+        ),
+    ];
+  }
+
   /// `GET /api/download` 整文件读入内存（用于保存图片；需共享的下载权限）。
   Future<Uint8List> download(String share, String path) async {
     final res = await _send(

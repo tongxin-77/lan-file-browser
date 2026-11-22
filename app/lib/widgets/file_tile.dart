@@ -9,11 +9,15 @@ class FileTile extends StatelessWidget {
     super.key,
     required this.item,
     required this.onTap,
+    this.onLongPress,
     this.thumbnail,
   });
 
   final FileItem item;
   final VoidCallback onTap;
+
+  /// 长按菜单（如删除）；null 时长按无反应。
+  final VoidCallback? onLongPress;
 
   /// 有缩略图时替代类别图标（约 64×40）。
   final Widget? thumbnail;
@@ -64,6 +68,7 @@ class FileTile extends StatelessWidget {
               )
             : null,
         onTap: onTap,
+        onLongPress: onLongPress,
       ),
     );
   }
@@ -75,11 +80,13 @@ class FileGridTile extends StatelessWidget {
     super.key,
     required this.item,
     required this.onTap,
+    this.onLongPress,
     this.thumbnail,
   });
 
   final FileItem item;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final Widget? thumbnail;
 
   @override
@@ -90,6 +97,7 @@ class FileGridTile extends StatelessWidget {
       opacity: watched ? 0.6 : 1,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(10),
         child: Padding(
           padding: const EdgeInsets.all(4),

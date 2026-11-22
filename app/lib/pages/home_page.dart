@@ -74,6 +74,68 @@ class _HomePageState extends State<HomePage> {
         .then((_) => _loadContinue());
   }
 
+  /// 乐观移除：先改列表再请求，失败回滚并提示。[item] 为 null 表示清空。
+  Future<void> _removeContinue(ContinueItem? item) async {
+    final before = _continue;
+    setState(() {
+      _continue = item == null
+          ? const []
+          : [
+              for (final c in _continue)
+                if (c != item) c,
+            ];
+    });
+    try {
+      if (item == null) {
+        await widget.client.clearContinue();
+      } else {
+        await widget.client.removeContinue(item.share, item.path);
+      }
+    } on LfbException catch (e) {
+      if (!mounted) return;
+      setState(() => _continue = before);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('移除失败：${e.message}')));
+    }
+  }
+
+  Future<void> _continueMenu(ContinueItem c) async {
+    final remove = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: NightColors.pillow,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListTile(
+          leading: const Icon(Icons.remove_circle_outline),
+          title: const Text('从列表移除'),
+          onTap: () => Navigator.of(ctx).pop(true),
+        ),
+      ),
+    );
+    if (remove == true) _removeContinue(c);
+  }
+
+  Future<void> _confirmClearContinue() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空“接着看”？'),
+        content: const Text('只清空这台手机的观看列表，不会删除电脑上的文件。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('清空'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) _removeContinue(null);
+  }
+
   @override
   void dispose() {
     vaultController.removeListener(_onVault);
@@ -135,11 +197,13 @@ class _HomePageState extends State<HomePage> {
           .showSnackBar(const SnackBar(content: Text('该文件夹暂时不可用（硬盘未连接？）')));
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BrowserPage(client: widget.client, share: s),
-      ),
-    );
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => BrowserPage(client: widget.client, share: s),
+          ),
+        )
+        .then((_) => _loadContinue()); // 可能播过或删过文件
   }
 
   @override
@@ -219,17 +283,32 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(height: 24),
                     if (_continue.isNotEmpty) ...[
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
-                        child: Text(
-                          '接着看',
-                          style: TextStyle(color: NightColors.ash),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 4, 0),
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                '接着看',
+                                style: TextStyle(color: NightColors.ash),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _confirmClearContinue,
+                              style: TextButton.styleFrom(
+                                foregroundColor: NightColors.ash,
+                                minimumSize: const Size(48, 48),
+                              ),
+                              child: const Text('清空'),
+                            ),
+                          ],
                         ),
                       ),
                       for (final c in _continue)
                         ContinueTile(
                           item: c,
                           onTap: () => _play(c),
+                          onLongPress: () => _continueMenu(c),
                           art: ServerThumb(
                             client: widget.client,
                             share: c.share,

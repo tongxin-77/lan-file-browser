@@ -160,6 +160,69 @@ class _BrowserPageState extends State<BrowserPage> {
     }
   }
 
+  /// 长按菜单：目前只有“删除”，仅在共享有删除权限（perms.modify）时提供。
+  VoidCallback? _longPress(FileItem item) =>
+      widget.share.perms.modify ? () => _itemMenu(item) : null;
+
+  Future<void> _itemMenu(FileItem item) async {
+    final delete = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: NightColors.pillow,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListTile(
+          leading: const Icon(Icons.delete_outline),
+          title: const Text('删除'),
+          onTap: () => Navigator.of(ctx).pop(true),
+        ),
+      ),
+    );
+    if (delete == true && mounted) _confirmDelete(item);
+  }
+
+  Future<void> _confirmDelete(FileItem item) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除“${item.name}”？'),
+        content: Text(
+          item.isDir ? '文件夹及其中的全部内容将移入电脑的回收站。' : '将移入电脑的回收站，可在电脑上还原。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final path = joinPath(_path, item.name);
+    try {
+      final failed = await widget.client.deleteFiles(widget.share.id, [path]);
+      if (!mounted) return;
+      if (failed.isEmpty) {
+        if (item.hasThumb) {
+          evictServerThumbs(widget.client, widget.share.id, path, item.mtime);
+        }
+        _toast('已移入电脑的回收站');
+      } else {
+        _toast(deleteErrorText(failed.first.code, failed.first.message));
+      }
+    } on ApiException catch (e) {
+      if (mounted) _toast(deleteErrorText(e.code, e.message));
+    } on LfbException catch (e) {
+      if (mounted) _toast(e.message);
+    }
+    if (!mounted) return;
+    _etag = null;
+    _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     final segments = _path.isEmpty ? <String>[] : _path.split('/');
@@ -241,6 +304,7 @@ class _BrowserPageState extends State<BrowserPage> {
                   item: item,
                   thumbnail: _thumb(item),
                   onTap: () => _open(item),
+                  onLongPress: _longPress(item),
                 );
               },
             )
@@ -260,6 +324,7 @@ class _BrowserPageState extends State<BrowserPage> {
                   item: item,
                   thumbnail: _thumb(item, width: 64),
                   onTap: () => _open(item),
+                  onLongPress: _longPress(item),
                 );
               },
             ),
@@ -330,3 +395,12 @@ class _BrowserPageState extends State<BrowserPage> {
     );
   }
 }
+
+/// 删除失败的中文提示（03 §4.10）。
+String deleteErrorText(String code, String fallback) => switch (code) {
+  'IN_USE' => '文件正在播放或被电脑上的程序占用，关闭后再试',
+  'FORBIDDEN' => '没有删除这个文件夹内容的权限',
+  'NOT_FOUND' => '文件已不存在',
+  'NO_RECYCLE_BIN' => '电脑上这个盘没有回收站或回收站放不下，为安全起见没有删除',
+  _ => '删除失败：$fallback',
+};

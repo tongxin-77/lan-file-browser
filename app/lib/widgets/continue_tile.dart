@@ -12,11 +12,15 @@ class ContinueTile extends StatelessWidget {
     super.key,
     required this.item,
     required this.onTap,
+    this.onLongPress,
     this.art,
   });
 
   final ContinueItem item;
   final VoidCallback onTap;
+
+  /// 长按菜单（从列表移除）。
+  final VoidCallback? onLongPress;
 
   /// 封面（缩略图）；null 时用占位色块。
   final Widget? art;
@@ -32,6 +36,7 @@ class ContinueTile extends StatelessWidget {
         : null;
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       borderRadius: BorderRadius.circular(14),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
