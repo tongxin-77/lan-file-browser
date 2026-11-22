@@ -101,7 +101,7 @@ void main() {
           Scaffold(
             body: SettingsSheet(
               version: Future.value('0.1.0-beta.1'),
-              onCheck: () async => '已是最新版本',
+              onCheck: () async => (text: '已是最新版本', failed: false),
             ),
           ),
         ),
@@ -112,7 +112,7 @@ void main() {
   }
 
   testWidgets('设置面板：显示版本，检查更新给出结果', (tester) async {
-    final done = Completer<String?>();
+    final done = Completer<({String text, bool failed})?>();
     await tester.pumpWidget(
       app(
         Scaffold(
@@ -130,10 +130,12 @@ void main() {
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
-    done.complete('检查失败：无法连接到电脑');
+    expect(find.text('在浏览器中打开下载页'), findsNothing);
+    done.complete((text: '检查失败：无法访问 GitHub（可能需要代理）', failed: true));
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsNothing);
-    expect(find.text('检查失败：无法连接到电脑'), findsOneWidget);
+    expect(find.text('检查失败：无法访问 GitHub（可能需要代理）'), findsOneWidget);
+    expect(find.text('在浏览器中打开下载页'), findsOneWidget);
   });
 
   testWidgets('看图：旋转按钮切横/竖屏，横屏不溢出，离开恢复竖屏', (tester) async {

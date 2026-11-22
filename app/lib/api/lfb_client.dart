@@ -10,7 +10,6 @@ import '../models/file_item.dart';
 import '../models/server.dart';
 import '../models/share.dart';
 import '../models/subtitle.dart';
-import '../services/app_update.dart';
 import 'api_exception.dart';
 
 /// 服务端 HTTP 客户端：Bearer 鉴权、错误 JSON → [ApiException]、
@@ -438,16 +437,6 @@ class LfbClient {
   /// `POST /api/vault/lock`：销毁服务端会话。
   Future<void> lockVault(String session) async {
     await _send('POST', '/api/vault/lock', headers: {'X-Vault': session});
-  }
-
-  /// `GET /api/app/latest`；服务端尚无版本信息（404）时返回 null。
-  Future<AppRelease?> appLatest() async {
-    try {
-      return AppRelease.fromJson(_json(await _send('GET', '/api/app/latest')));
-    } on ApiException catch (e) {
-      if (e.statusCode == 404) return null;
-      rethrow;
-    }
   }
 }
 

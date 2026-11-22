@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -140,20 +141,172 @@ void main() {
     });
   });
 
-  group('AppRelease 解析', () {
-    test('解析 /api/app/latest', () {
-      final r = AppRelease.fromJson({
-        'version': '1.3.0',
-        'minAppVersion': '1.1.0',
-        'notes': '修复',
-        'apks': {'arm64-v8a': 'http://h/api/app/apk/arm64-v8a'},
-        'sha256': {'arm64-v8a': 'ab'},
+  group('GitHub Release 与通道', () {
+    Map<String, dynamic> rel(
+      String tag, {
+      bool draft = false,
+      List<String> assets = const [],
+    }) => {
+      'tag_name': tag,
+      'body': '说明 $tag',
+      'html_url': 'https://github.com/$githubRepo/releases/tag/$tag',
+      'draft': draft,
+      'prerelease': tag.contains('-'),
+      'assets': [
+        for (final a in assets)
+          {'name': a, 'browser_download_url': 'https://dl/$tag/$a'},
+      ],
+    };
+
+    test('pickRelease 忽略草稿与无效版本号，取 semver 最大（含正式版）', () {
+      final list = [
+        rel('v0.1.0-beta.9'),
+        rel('v0.1.0-beta.10'),
+        rel('v0.2.0-beta.1', draft: true),
+        rel('nightly'),
+      ].map(GithubRelease.fromJson);
+      expect(pickRelease(list)!.version, 'v0.1.0-beta.10');
+      expect(
+        pickRelease([...list, GithubRelease.fromJson(rel('v0.1.0'))])!.version,
+        'v0.1.0',
+      );
+      expect(
+        pickRelease([GithubRelease.fromJson(rel('v1.0.0', draft: true))]),
+        isNull,
+      );
+    });
+
+    test('资产：按 lfb-app-<abi>.apk 识别 APK，取 checksums.txt', () {
+      final r = GithubRelease.fromJson(
+        rel(
+          'v1.0.0',
+          assets: [
+            'lfb-app-arm64-v8a.apk',
+            'lfb-app-armeabi-v7a.apk',
+            'lfb-server-setup-1.0.0.exe',
+            'checksums.txt',
+          ],
+        ),
+      );
+      expect(r.apks, {
+        'arm64-v8a': 'https://dl/v1.0.0/lfb-app-arm64-v8a.apk',
+        'armeabi-v7a': 'https://dl/v1.0.0/lfb-app-armeabi-v7a.apk',
       });
-      expect(r.version, '1.3.0');
-      expect(r.minAppVersion, '1.1.0');
-      expect(r.notes, '修复');
-      expect(r.apks['arm64-v8a'], 'http://h/api/app/apk/arm64-v8a');
-      expect(r.sha256['arm64-v8a'], 'ab');
+      expect(r.checksumsUrl, 'https://dl/v1.0.0/checksums.txt');
+      expect(r.htmlUrl, endsWith('/releases/tag/v1.0.0'));
+      expect(chooseAbi(['arm64-v8a', 'armeabi-v7a'], r.apks), 'arm64-v8a');
+      expect(apkAssetName('arm64-v8a'), 'lfb-app-arm64-v8a.apk');
+    });
+
+    test('没有匹配本机 ABI 的 APK 时 chooseAbi 为 null', () {
+      final r = GithubRelease.fromJson(
+        rel('v1.0.0', assets: ['lfb-app-x86_64.apk', 'checksums.txt']),
+      );
+      expect(chooseAbi(['arm64-v8a', 'armeabi-v7a'], r.apks), isNull);
+    });
+
+    test('正式版 App 只请求 releases/latest，带 Accept 与 User-Agent', () async {
+      late http.Request seen;
+      final client = MockClient((req) async {
+        seen = req;
+        return http.Response.bytes(utf8.encode(jsonEncode(rel('v1.2.0'))), 200);
+      });
+      final r = await fetchRelease('1.1.0', client: client);
+      expect(
+        seen.url.toString(),
+        'https://api.github.com/repos/$githubRepo/releases/latest',
+      );
+      expect(seen.headers['Accept'], 'application/vnd.github+json');
+      expect(seen.headers['User-Agent'], 'lfb-app');
+      expect(r!.version, 'v1.2.0');
+    });
+
+    test('正式版：还没有任何正式 Release（404）返回 null', () async {
+      final client = MockClient((_) async => http.Response('{}', 404));
+      expect(await fetchRelease('1.0.0', client: client), isNull);
+    });
+
+    test('预发布 App 请求列表，过滤草稿取最大（可升到正式版）', () async {
+      late Uri seen;
+      final client = MockClient((req) async {
+        seen = req.url;
+        return http.Response.bytes(
+          utf8.encode(
+            jsonEncode([
+              rel('v0.2.0-beta.1', draft: true),
+              rel('v0.1.0-beta.2'),
+              rel('v0.1.0'),
+            ]),
+          ),
+          200,
+        );
+      });
+      final r = await fetchRelease('0.1.0-beta.1', client: client);
+      expect(
+        seen.toString(),
+        'https://api.github.com/repos/$githubRepo/releases?per_page=20',
+      );
+      expect(r!.version, 'v0.1.0');
+    });
+
+    test('403 / 429 限流：提示稍后再试', () async {
+      for (final code in [403, 429]) {
+        final client = MockClient((_) async => http.Response('{}', code));
+        await expectLater(
+          fetchRelease('1.0.0', client: client),
+          throwsA(
+            isA<UpdateException>().having(
+              (e) => e.message,
+              'message',
+              contains('稍后再试'),
+            ),
+          ),
+        );
+      }
+    });
+
+    test('网络不通：提示无法访问 GitHub（可能需要代理）', () async {
+      final client = MockClient(
+        (_) async => throw http.ClientException('Connection refused'),
+      );
+      await expectLater(
+        fetchRelease('1.0.0', client: client),
+        throwsA(
+          isA<UpdateException>().having(
+            (e) => e.message,
+            'message',
+            unreachableMessage,
+          ),
+        ),
+      );
+    });
+  });
+
+  group('checksums.txt', () {
+    final a = 'a' * 64, b = 'B' * 64;
+    test('解析 sha256sum 格式（含 * 二进制标记、空行）', () {
+      final m = parseChecksums(
+        '$a  lfb-app-arm64-v8a.apk\n\n$b *lfb-server-setup-1.0.0.exe\r\nbad line\n',
+      );
+      expect(m, {
+        'lfb-app-arm64-v8a.apk': a,
+        'lfb-server-setup-1.0.0.exe': b.toLowerCase(),
+      });
+    });
+
+    test('fetchChecksum 取出指定文件；没有该文件报错', () async {
+      final client = MockClient(
+        (_) async => http.Response('$a  lfb-app-arm64-v8a.apk\n', 200),
+      );
+      final url = Uri.parse('https://dl/checksums.txt');
+      expect(
+        await fetchChecksum(url, 'lfb-app-arm64-v8a.apk', client: client),
+        a,
+      );
+      await expectLater(
+        fetchChecksum(url, 'lfb-app-x86_64.apk', client: client),
+        throwsA(isA<UpdateException>()),
+      );
     });
   });
 
@@ -171,7 +324,7 @@ void main() {
       expect(await verifySha256(f, ''), isFalse);
     });
 
-    test('下载报告进度、带 Bearer 头、写入文件', () async {
+    test('下载报告进度、带请求头、写入文件并校验通过', () async {
       late http.BaseRequest seen;
       final body = List<int>.generate(1000, (i) => i % 256);
       final client = MockClient.streaming((req, _) async {
@@ -185,16 +338,134 @@ void main() {
       final progress = <(int, int?)>[];
       final dest = File('${dir.path}/b.apk');
       final dl = ApkDownload.start(
-        Uri.parse('http://h/api/app/apk/arm64-v8a'),
+        Uri.parse('https://dl/lfb-app-arm64-v8a.apk'),
         dest,
-        headers: {'Authorization': 'Bearer t'},
+        headers: downloadHeaders,
+        sha256Hex: sha256.convert(body).toString(),
         httpClient: client,
         onProgress: (got, total) => progress.add((got, total)),
       );
       final f = await dl.done;
-      expect(seen.headers['Authorization'], 'Bearer t');
+      expect(seen.headers['User-Agent'], 'lfb-app');
+      expect(seen.headers.containsKey('Range'), isFalse);
       expect(f.readAsBytesSync(), body);
       expect(progress, [(400, 1000), (1000, 1000)]);
+    });
+
+    test('中途断开后自动重试，带 Range 续传（206）', () async {
+      final body = List<int>.generate(1000, (i) => (i * 7) % 256);
+      final requests = <http.BaseRequest>[];
+      final client = MockClient.streaming((req, _) async {
+        requests.add(req);
+        if (requests.length == 1) {
+          // 第一次：发出 300 字节后连接断开
+          final ctrl = StreamController<List<int>>();
+          ctrl.add(body.sublist(0, 300));
+          scheduleMicrotask(() {
+            ctrl.addError(http.ClientException('Connection closed'));
+            ctrl.close();
+          });
+          return http.StreamedResponse(
+            ctrl.stream,
+            200,
+            contentLength: body.length,
+          );
+        }
+        return http.StreamedResponse(
+          Stream.value(body.sublist(300)),
+          206,
+          contentLength: 700,
+          headers: {'content-range': 'bytes 300-999/1000'},
+        );
+      });
+      final progress = <(int, int?)>[];
+      final dl = ApkDownload.start(
+        Uri.parse('https://dl/x.apk'),
+        File('${dir.path}/r.apk'),
+        sha256Hex: sha256.convert(body).toString(),
+        httpClient: client,
+        retryDelay: Duration.zero,
+        onProgress: (got, total) => progress.add((got, total)),
+      );
+      final f = await dl.done;
+      expect(requests, hasLength(2));
+      expect(requests[1].headers['Range'], 'bytes=300-');
+      expect(f.readAsBytesSync(), body);
+      expect(progress.last, (1000, 1000));
+    });
+
+    test('连接提前正常结束（少于 Content-Length）也续传', () async {
+      final body = List<int>.generate(500, (i) => i % 256);
+      var n = 0;
+      final client = MockClient.streaming((req, _) async {
+        if (++n == 1) {
+          return http.StreamedResponse(
+            Stream.value(body.sublist(0, 200)),
+            200,
+            contentLength: 500,
+          );
+        }
+        expect(req.headers['Range'], 'bytes=200-');
+        return http.StreamedResponse(
+          Stream.value(body.sublist(200)),
+          206,
+          headers: {'content-range': 'bytes 200-499/500'},
+        );
+      });
+      final dl = ApkDownload.start(
+        Uri.parse('https://dl/x.apk'),
+        File('${dir.path}/s.apk'),
+        httpClient: client,
+        retryDelay: Duration.zero,
+      );
+      expect((await dl.done).readAsBytesSync(), body);
+    });
+
+    test('多次重试无进展后失败，不留文件', () async {
+      var n = 0;
+      final client = MockClient.streaming((req, _) async {
+        n++;
+        throw http.ClientException('reset');
+      });
+      final dest = File('${dir.path}/t.apk');
+      final dl = ApkDownload.start(
+        Uri.parse('https://dl/x.apk'),
+        dest,
+        httpClient: client,
+        maxRetries: 2,
+        retryDelay: Duration.zero,
+      );
+      await expectLater(dl.done, throwsA(isA<http.ClientException>()));
+      expect(n, 3);
+      expect(dest.existsSync(), isFalse);
+    });
+
+    test('sha256 不符：删除文件并报校验失败', () async {
+      final client = MockClient.streaming(
+        (req, _) async => http.StreamedResponse(
+          Stream.value([1, 2, 3]),
+          200,
+          contentLength: 3,
+        ),
+      );
+      final dest = File('${dir.path}/v.apk');
+      final dl = ApkDownload.start(
+        Uri.parse('https://dl/x.apk'),
+        dest,
+        sha256Hex: sha256.convert([9]).toString(),
+        httpClient: client,
+      );
+      await expectLater(
+        dl.done,
+        throwsA(
+          isA<UpdateException>().having(
+            (e) => e.message,
+            'message',
+            contains('校验失败'),
+          ),
+        ),
+      );
+      expect(dest.existsSync(), isFalse);
     });
 
     test('取消后删除半截文件并以 DownloadCancelled 结束', () async {
@@ -236,15 +507,20 @@ void main() {
       expect(dest.existsSync(), isFalse);
     });
 
-    test('HTTP 错误以异常结束且不留文件', () async {
-      final client = MockClient((req) async => http.Response('', 404));
+    test('HTTP 错误状态不重试，以异常结束且不留文件', () async {
+      var n = 0;
+      final client = MockClient((req) async {
+        n++;
+        return http.Response('', 404);
+      });
       final dest = File('${dir.path}/d.apk');
       final dl = ApkDownload.start(
         Uri.parse('http://h/x'),
         dest,
         httpClient: client,
       );
-      await expectLater(dl.done, throwsA(isA<HttpException>()));
+      await expectLater(dl.done, throwsA(isA<UpdateException>()));
+      expect(n, 1);
       expect(dest.existsSync(), isFalse);
     });
   });

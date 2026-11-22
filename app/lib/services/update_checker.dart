@@ -4,13 +4,12 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
-import '../api/api_exception.dart';
 import '../api/lfb_client.dart';
 import '../models/server.dart';
 import '../widgets/update_dialog.dart';
 import 'app_update.dart';
 
-/// 连接成功后检查 App 更新与电脑端版本兼容（02 §5.2、5.3），之后每天一次；失败静默。
+/// 连接成功后从 GitHub 检查 App 更新并检查电脑端版本兼容（02 §5.2、5.3），之后每天一次；失败静默。
 class UpdateChecker {
   UpdateChecker(this._context);
 
@@ -48,48 +47,65 @@ class UpdateChecker {
   }
 
   Future<void> _check(LfbClient client) async {
-    final ping = await client.ping();
-    if (!_serverWarned && needsServerUpgrade(ping.version)) {
+    final ping = await _ping(client);
+    GithubRelease? latest;
+    try {
+      latest = await fetchRelease(await _currentVersion());
+    } on UpdateException {
+      // 自动检查失败静默；强制更新仍要提示（只能去浏览器下载）
+    }
+    if (ping != null && !_serverWarned && needsServerUpgrade(ping.version)) {
       _serverWarned = true;
       final ctx = _context();
       if (ctx != null && ctx.mounted) {
-        await showServerUpgradeDialog(ctx, ping.version);
+        await showServerUpgradeDialog(
+          ctx,
+          ping.version,
+          latest?.htmlUrl ?? releasesPageUrl,
+        );
       }
     }
-    await _offer(client, ping, await client.appLatest(), manual: false);
+    await _offer(ping, latest, manual: false);
   }
 
   /// 设置里的“检查更新”（02 §5.2）：有新版直接弹更新框（返回 null），
-  /// 否则返回给用户看的结果；忽略“稍后”记录与 24 小时间隔。
-  Future<String?> checkNow(LfbClient client) async {
+  /// 否则返回给用户看的结果（[failed] 为真时面板另给“在浏览器中打开下载页”）；
+  /// 忽略“稍后”记录与 24 小时间隔。
+  Future<({String text, bool failed})?> checkNow(LfbClient client) async {
     try {
-      final ping = await client.ping();
-      final latest = await client.appLatest();
-      if (await _offer(client, ping, latest, manual: true)) return null;
-      if (latest == null) {
-        return '电脑端暂时没有可用的 App 版本信息'
-            '（电脑端尚未从 GitHub 取到正式版 Release，或其检查更新失败 / 已关闭）';
-      }
-      return '已是最新版本';
-    } on LfbException catch (e) {
-      return '检查失败：${e.message}';
+      final ping = await _ping(client);
+      final latest = await fetchRelease(await _currentVersion());
+      if (await _offer(ping, latest, manual: true)) return null;
+      return (text: '已是最新版本', failed: false);
+    } on UpdateException catch (e) {
+      return (text: '检查失败：${e.message}', failed: true);
     } on Object catch (e) {
-      return '检查失败：$e';
+      return (text: '检查失败：$e', failed: true);
     }
   }
 
+  /// 电脑端版本与 minAppVersion 只用于兼容提示；连不上电脑不影响从 GitHub 检查。
+  Future<PingInfo?> _ping(LfbClient client) async {
+    try {
+      return await client.ping();
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<String> _currentVersion() async =>
+      (await PackageInfo.fromPlatform()).version;
+
   /// 需要更新时弹更新框并返回 true；无需更新返回 false。
   Future<bool> _offer(
-    LfbClient client,
-    PingInfo ping,
-    AppRelease? latest, {
+    PingInfo? ping,
+    GithubRelease? latest, {
     required bool manual,
   }) async {
-    final current = (await PackageInfo.fromPlatform()).version;
     final decision = decideUpdate(
-      current: current,
+      current: await _currentVersion(),
       latest: latest?.version,
-      minAppVersion: ping.minAppVersion,
+      minAppVersion: ping?.minAppVersion,
     );
     if (decision == UpdateDecision.none) return false;
     final forced = decision == UpdateDecision.forced;
@@ -99,15 +115,15 @@ class UpdateChecker {
     final abi = latest == null ? null : chooseAbi(abis, latest.apks);
     final ctx = _context();
     if (ctx == null || !ctx.mounted) return false;
+    final checksums = latest?.checksumsUrl;
     final offer = UpdateOffer(
       version: latest?.version,
       notes: latest?.notes ?? '',
       forced: forced,
+      releaseUrl: latest?.htmlUrl ?? releasesPageUrl,
       apkUrl: abi == null ? null : Uri.parse(latest!.apks[abi]!),
-      sha256: abi == null ? null : latest!.sha256[abi],
-      headers: {
-        if (client.token != null) 'Authorization': 'Bearer ${client.token}',
-      },
+      apkName: abi == null ? null : apkAssetName(abi),
+      checksumsUrl: checksums == null ? null : Uri.parse(checksums),
     );
     final installing = await showUpdateDialog(ctx, offer);
     if (!installing && !forced) _skipped = latest?.version;

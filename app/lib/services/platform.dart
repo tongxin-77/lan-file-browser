@@ -150,4 +150,13 @@ class PlatformService {
       return false;
     }
   }
+
+  /// 用系统浏览器打开 [url]（浏览器不受本进程绑定 Wi-Fi 的影响，可走 VPN / 代理）。
+  static Future<bool> openUrl(String url) async {
+    try {
+      return await _channel.invokeMethod<bool>('openUrl', url) ?? false;
+    } on Exception {
+      return false;
+    }
+  }
 }

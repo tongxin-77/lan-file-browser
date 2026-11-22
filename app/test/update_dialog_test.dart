@@ -28,8 +28,8 @@ void main() {
             version: '2.0.0',
             notes: '接口变更',
             forced: true,
-            apkUrl: Uri.parse('http://h/api/app/apk/arm64-v8a'),
-            sha256: 'ab',
+            apkUrl: Uri.parse('https://dl/lfb-app-arm64-v8a.apk'),
+            apkName: 'lfb-app-arm64-v8a.apk',
           ),
         ),
       ),
@@ -67,5 +67,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('发现新版本'), findsNothing);
     expect(r, isFalse);
+  });
+
+  testWidgets('没有适合本机的安装包：提示并给出“在浏览器中打开下载页”', (tester) async {
+    await tester.pumpWidget(
+      host(
+        (ctx) => showUpdateDialog(
+          ctx,
+          const UpdateOffer(
+            version: 'v1.3.0',
+            notes: '',
+            forced: false,
+            releaseUrl: 'https://github.com/x/y/releases/tag/v1.3.0',
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('没有适合这台手机的安装包'), findsOneWidget);
+    expect(find.text('在浏览器中打开下载页'), findsOneWidget);
+    expect(find.text('更新'), findsNothing);
   });
 }

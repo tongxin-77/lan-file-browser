@@ -7,25 +7,29 @@ import '../services/app_update.dart';
 import '../services/platform.dart';
 import '../theme.dart';
 
-/// 一次更新提示的内容。[apkUrl] 为 null 表示服务端暂无适合本机的安装包。
+/// 一次更新提示的内容（来自 GitHub Release）。[apkUrl] 为 null 表示没有适合本机的安装包。
 class UpdateOffer {
   const UpdateOffer({
     required this.version,
     required this.notes,
     required this.forced,
+    this.releaseUrl = releasesPageUrl,
     this.apkUrl,
-    this.sha256,
-    this.headers = const {},
+    this.apkName,
+    this.checksumsUrl,
   });
 
   final String? version;
   final String notes;
   final bool forced;
-  final Uri? apkUrl;
-  final String? sha256;
 
-  /// 下载 APK 时附带的请求头（设备 Bearer token）。
-  final Map<String, String> headers;
+  /// 该版本的 Release 页面（html_url），用系统浏览器下载的兜底。
+  final String releaseUrl;
+  final Uri? apkUrl;
+
+  /// 安装包资产名，用于在 checksums.txt 中查 sha256。
+  final String? apkName;
+  final Uri? checksumsUrl;
 }
 
 /// App 更新对话框（02 §5.2）：普通更新可关闭；强制更新不可关闭、不可返回。
@@ -52,7 +56,9 @@ class UpdateDialog extends StatefulWidget {
 
 class _UpdateDialogState extends State<UpdateDialog> {
   _Stage _stage = _Stage.offer;
-  double? _progress;
+  int _got = 0;
+  int? _total;
+  int _attempt = 0; // 取校验文件期间被取消后，旧的这次不再继续
   String? _error;
   ApkDownload? _download;
   File? _file;
@@ -65,33 +71,40 @@ class _UpdateDialogState extends State<UpdateDialog> {
   }
 
   Future<void> _start() async {
-    final url = widget.offer.apkUrl!;
+    final o = widget.offer;
+    final attempt = ++_attempt;
     setState(() {
       _stage = _Stage.downloading;
-      _progress = null;
+      _got = 0;
+      _total = null;
       _error = null;
     });
     try {
+      final checksums = o.checksumsUrl;
+      if (checksums == null) {
+        throw const UpdateException('该版本缺少校验文件，无法校验安装包');
+      }
+      final hex = await fetchChecksum(checksums, o.apkName!);
+      if (!mounted || attempt != _attempt) return; // 期间已取消
       final dir = Directory(
         '${(await getApplicationCacheDirectory()).path}/apk',
       );
       if (dir.existsSync()) dir.deleteSync(recursive: true); // 只留本次下载
       final dl = _download = ApkDownload.start(
-        url,
-        File('${dir.path}/lfb-app-${widget.offer.version}.apk'),
-        headers: widget.offer.headers,
+        o.apkUrl!,
+        File('${dir.path}/lfb-app-${o.version}.apk'),
+        headers: downloadHeaders,
+        sha256Hex: hex,
         onProgress: (got, total) {
-          if (mounted && total != null && total > 0) {
-            setState(() => _progress = got / total);
+          if (mounted) {
+            setState(() {
+              _got = got;
+              _total = total;
+            });
           }
         },
       );
-      final file = await dl.done;
-      if (!await verifySha256(file, widget.offer.sha256 ?? '')) {
-        file.deleteSync();
-        throw const FileSystemException('校验失败');
-      }
-      _file = file;
+      _file = await dl.done;
       if (!mounted) return;
       setState(() => _stage = _Stage.install);
       await _install();
@@ -101,9 +114,9 @@ class _UpdateDialogState extends State<UpdateDialog> {
       if (!mounted) return;
       setState(() {
         _stage = _Stage.failed;
-        _error = e is FileSystemException && e.message == '校验失败'
-            ? '安装包校验失败，请重试'
-            : '下载失败，请确认与电脑的连接后重试';
+        _error = e is UpdateException
+            ? e.message
+            : '下载失败：$unreachableMessage。可重试，或在浏览器中打开下载页';
       });
     } finally {
       _download = null;
@@ -145,16 +158,21 @@ class _UpdateDialogState extends State<UpdateDialog> {
         Text(o.notes.trim(), style: faint),
       ],
       if (o.apkUrl == null)
-        const Text('电脑上暂时没有适合这台手机的安装包，请稍后再试。', style: faint),
+        const Text('这个版本没有适合这台手机的安装包，可在浏览器中打开下载页查看。', style: faint),
     ];
     switch (_stage) {
       case _Stage.downloading:
+        final total = _total;
+        final progress = total == null || total <= 0 ? null : _got / total;
         lines.addAll([
           const SizedBox(height: 16),
-          LinearProgressIndicator(value: _progress),
+          LinearProgressIndicator(value: progress),
           const SizedBox(height: 8),
           Text(
-            _progress == null ? '正在下载…' : '正在下载 ${(_progress! * 100).floor()}%',
+            progress == null
+                ? '正在下载… ${_mb(_got)}'
+                : '正在下载 ${_mb(_got)} / ${_mb(total!)}'
+                      '（${(progress * 100).floor()}%）',
             style: faint,
           ),
         ]);
@@ -187,11 +205,16 @@ class _UpdateDialogState extends State<UpdateDialog> {
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('稍后'),
           );
+    final browser = TextButton(
+      onPressed: () => PlatformService.openUrl(o.releaseUrl),
+      child: const Text('在浏览器中打开下载页'),
+    );
     switch (_stage) {
       case _Stage.offer:
       case _Stage.failed:
         return [
           ?later,
+          if (o.apkUrl == null || _stage == _Stage.failed) browser,
           if (o.apkUrl != null)
             FilledButton(
               onPressed: _start,
@@ -201,7 +224,14 @@ class _UpdateDialogState extends State<UpdateDialog> {
       case _Stage.downloading:
         return [
           TextButton(
-            onPressed: () => _download?.cancel(),
+            onPressed: () {
+              final dl = _download;
+              if (dl != null) return dl.cancel();
+              setState(() {
+                _attempt++; // 仍在取校验文件
+                _stage = _Stage.offer;
+              });
+            },
             child: const Text('取消'),
           ),
         ];
@@ -219,26 +249,28 @@ class _UpdateDialogState extends State<UpdateDialog> {
   }
 }
 
-/// 电脑端版本过旧（低于 App 的 minServerVersion，02 §5.3）。
-Future<void> showServerUpgradeDialog(BuildContext context, String version) =>
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: NightColors.pillow,
-        title: const Text('请升级电脑端'),
-        content: SelectableText(
-          '电脑上的 LAN File Browser（$version）版本过旧，部分功能可能无法使用。'
-          '请在电脑上下载安装新版：\n$serverReleaseUrl',
-          style: const TextStyle(color: NightColors.ash, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
+String _mb(int bytes) => '${(bytes / 1048576).toStringAsFixed(1)} MB';
 
-const serverReleaseUrl =
-    'https://github.com/tongxin-77/lan-file-browser/releases/latest';
+/// 电脑端版本过旧（低于 App 的 minServerVersion，02 §5.3）；[releaseUrl] 为对应版本的 Release 页面。
+Future<void> showServerUpgradeDialog(
+  BuildContext context,
+  String version,
+  String releaseUrl,
+) => showDialog<void>(
+  context: context,
+  builder: (context) => AlertDialog(
+    backgroundColor: NightColors.pillow,
+    title: const Text('请升级电脑端'),
+    content: SelectableText(
+      '电脑上的 LAN File Browser（$version）版本过旧，部分功能可能无法使用。'
+      '请在电脑上下载安装新版：\n$releaseUrl',
+      style: const TextStyle(color: NightColors.ash, height: 1.5),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('知道了'),
+      ),
+    ],
+  ),
+);

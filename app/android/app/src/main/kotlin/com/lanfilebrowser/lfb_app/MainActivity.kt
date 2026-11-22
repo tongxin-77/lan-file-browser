@@ -94,6 +94,18 @@ class MainActivity : FlutterActivity() {
                             result.error("INSTALL_FAILED", e.message, null)
                         }
                     }
+                    // App 更新兜底：系统浏览器打开 Release 页面（docs/02-release.md 5.2）
+                    "openUrl" -> result.success(
+                        try {
+                            startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(call.arguments as String))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                            true
+                        } catch (e: Exception) {
+                            false
+                        }
+                    )
                     else -> result.notImplemented()
                 }
             }

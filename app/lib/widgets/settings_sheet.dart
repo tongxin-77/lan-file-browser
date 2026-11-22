@@ -1,14 +1,17 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../services/app_update.dart';
+import '../services/platform.dart';
 import '../theme.dart';
 
 /// 首页右上角“设置”面板：当前 App 版本 + 手动“检查更新”（02 §5.2）。
 ///
-/// [onCheck] 有新版时自行弹更新框并返回 null，否则返回要显示的结果。
+/// [onCheck] 有新版时自行弹更新框并返回 null，否则返回要显示的结果；
+/// 失败时另给“在浏览器中打开下载页”。
 Future<void> showSettingsSheet(
   BuildContext context, {
   required Future<String> version,
-  required Future<String?> Function() onCheck,
+  required Future<({String text, bool failed})?> Function() onCheck,
 }) => showModalBottomSheet<void>(
   context: context,
   isScrollControlled: true,
@@ -25,7 +28,7 @@ class SettingsSheet extends StatefulWidget {
   });
 
   final Future<String> version;
-  final Future<String?> Function() onCheck;
+  final Future<({String text, bool failed})?> Function() onCheck;
 
   @override
   State<SettingsSheet> createState() => _SettingsSheetState();
@@ -33,7 +36,7 @@ class SettingsSheet extends StatefulWidget {
 
 class _SettingsSheetState extends State<SettingsSheet> {
   bool _checking = false;
-  String? _result;
+  ({String text, bool failed})? _result;
 
   Future<void> _check() async {
     setState(() {
@@ -82,7 +85,9 @@ class _SettingsSheetState extends State<SettingsSheet> {
               ),
               ListTile(
                 title: const Text('检查更新'),
-                subtitle: _result == null ? null : Text(_result!, style: faint),
+                subtitle: _result == null
+                    ? null
+                    : Text(_result!.text, style: faint),
                 trailing: _checking
                     ? const SizedBox.square(
                         dimension: 20,
@@ -91,6 +96,14 @@ class _SettingsSheetState extends State<SettingsSheet> {
                     : const Icon(Icons.chevron_right, color: NightColors.ash),
                 onTap: _checking ? null : _check,
               ),
+              if (_result?.failed ?? false)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () => PlatformService.openUrl(releasesPageUrl),
+                    child: const Text('在浏览器中打开下载页'),
+                  ),
+                ),
             ],
           ),
         ),

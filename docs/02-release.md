@@ -85,16 +85,22 @@ APK 签名：
 
 ### 5.2 App（Android）
 
+App 直接从 GitHub 检查与下载更新，不经电脑端（电脑端的 `/api/app/latest`、`/api/app/apk/{abi}` 与 APK 缓存仍保留，但 App 不再调用；服务端更新检查只用于电脑端自身更新与管理页横幅）。
+
 | 项 | 设计 |
 | ---- | ---- |
-| 检查来源（优先） | 通过已连接服务端代理：`GET /api/app/latest`（需设备鉴权），返回 `{version, minAppVersion, notes, apks: {abi: url}, sha256: {abi: hash}}`；尚无版本信息时 404。`apks` 只列已缓存且校验通过的 ABI，url 指向本服务 `GET /api/app/apk/{abi}`（支持 Range，可用 `?t=`），为空时走兜底 |
-| APK 缓存 | 服务端检查到最新 Release（不论服务端自身是否需要更新）即把 APK 下载到 `<数据目录>\cache\apk\<版本>\`，按 `checksums.txt` 校验 sha256，失败删除、缺校验值不缓存；只保留最新一个版本。缓存状态在内存中，重启后需再次检查成功才提供 |
-| 检查来源（兜底） | 直接请求 GitHub latest release |
-| abi 选择 | 通过 `device_info_plus` 读取 `supportedAbis`，优先 `arm64-v8a` |
-| 下载与安装 | 下载 APK → 校验 sha256 → 调用系统安装器（`open_filex` 或 `ota_update` 包） |
-| Android 配置 | `REQUEST_INSTALL_PACKAGES` 权限；`FileProvider` 暴露下载目录；首次需用户授予“安装未知应用” |
-| 提示方式 | 普通新版本：可关闭的对话框；低于 `minAppVersion`：强提示（不可跳过） |
-| 手动检查 | 首页右上角“设置”面板显示当前 App 版本，“检查更新”立即请求 `/api/app/latest`：有新版弹更新框；已是最新、服务端暂无版本信息（404）、连接失败都在面板内显示结果 |
+| 检查时机 | 连接电脑成功后 + 每 24h（`UpdateChecker`）；设置面板“检查更新”立即检查 |
+| 检查地址 | 与 5.1 相同的通道规则，按 App 自身版本（`PackageInfo.version`）决定：正式版 `GET https://api.github.com/repos/tongxin-77/lan-file-browser/releases/latest`（404 = 尚无正式版，视为无更新）；预发布版（带 `-`）`GET …/releases?per_page=20`，忽略草稿，在预发布与正式版中取 semver 最大者。`tag_name` 用 `semver.dart` 与当前版本比较 |
+| 请求 | 头 `Accept: application/vnd.github+json`、`User-Agent: lfb-app`，超时 15s；403 / 429 提示“GitHub 请求过于频繁，请稍后再试”；连不上 / 超时提示“无法访问 GitHub（可能需要代理）” |
+| abi 选择 | `device_info_plus` 读取 `supportedAbis`，优先 `arm64-v8a`，否则按设备偏好顺序；资产名 `lfb-app-<abi>.apk`。没有匹配的 APK 时更新框只提示并给“在浏览器中打开下载页” |
+| 校验 | 下载前取同一 Release 的 `checksums.txt`（sha256sum 格式）中该 APK 的 sha256，缺失则报错不下载；下载完校验，不符删除并提示重试 |
+| 下载 | 从资产 `browser_download_url` 下载到应用缓存目录 `apk/`（每次下载前清空），显示已下 / 总大小与百分比，可取消。连接中途断开、超时（空闲 30s）或提前结束时自动重试，用 `Range: bytes=<已下>-` 续传（206 追加；服务端回 200 则从头下）；连续 5 次无进展才失败，失败 / 取消删除半截文件。HTTP 错误状态不重试 |
+| 安装 | 校验通过后调用系统安装器：`REQUEST_INSTALL_PACKAGES` 权限，`FileProvider` 暴露缓存目录 `apk/`；首次需用户授予“安装未知应用” |
+| 浏览器兜底 | 检查失败（设置面板）、下载失败、无匹配 APK 时提供“在浏览器中打开下载页”：经 MethodChannel `openUrl` 用系统浏览器打开该版本 Release 页面（`html_url`；检查失败时为 Release 列表页） |
+| 提示方式 | 普通新版本：可关闭的对话框（“稍后”后本次运行不再自动提示该版本）；低于 `minAppVersion`：强提示（不可跳过；GitHub 不可达时仍弹出，只能去浏览器下载） |
+| 手动检查 | 首页右上角“设置”面板显示当前 App 版本，“检查更新”：有新版弹更新框；已是最新、失败原因在面板内显示，失败时另给浏览器按钮。连不上电脑不影响检查（`/api/ping` 只用于 `minAppVersion` 与电脑端版本兼容） |
+
+**VPN 与 Wi-Fi 绑定**：App 在 Wi-Fi 下 `bindProcessToNetwork` 绑定 Wi-Fi 以绕过 VPN 连电脑（01 §7.1），访问 GitHub 也因此不走 VPN，国内网络下可能不可达。不为此改动绑定逻辑：失败时提示“可能需要代理”，并用系统浏览器兜底（浏览器是另一个进程，不受本 App 绑定影响）。
 
 ### 5.3 版本兼容
 
@@ -108,15 +114,15 @@ APK 签名：
 
 | 情形 | 行为 |
 | ---- | ---- |
-| App 版本 < `minAppVersion` | App 强提示更新，可从服务端 `/api/app/latest` 直接下载 |
-| 服务端版本 < App 声明的 `minServerVersion`（App 内常量） | App 提示“请升级电脑端”，给出 Release 页面链接 |
+| App 版本 < `minAppVersion` | App 强提示更新，从 GitHub 下载（5.2） |
+| 服务端版本 < App 声明的 `minServerVersion`（App 内常量） | App 提示“请升级电脑端”，给出按 App 通道选出的 Release 页面链接（`html_url`；GitHub 不可达时为 Release 列表页） |
 | 同 MAJOR 且满足以上 | 正常使用 |
 
 ### 5.4 网络与限流
 
 | 问题 | 方案 |
 | ---- | ---- |
-| GitHub API 未鉴权限 60 次/小时/IP | 服务端启动时 + 24h 一次、App 优先走服务端代理，远低于上限；结果缓存 1h（管理页 / App 请求距上次检查超过 1h 才在后台重新检查，“检查更新”按钮除外）；请求带 `User-Agent: lfb-server` |
+| GitHub API 未鉴权限 60 次/小时/IP | 服务端启动时 + 24h 一次；App 直连 GitHub，每台手机连接后 + 24h 一次（加手动检查），远低于上限；结果缓存 1h（管理页 / App 请求距上次检查超过 1h 才在后台重新检查，“检查更新”按钮除外）；请求带 `User-Agent: lfb-server`（App 为 `lfb-app`）；App 遇 403 / 429 提示稍后再试 |
 | 国内访问 GitHub 慢 / 不通 | `config.json` 的 `update.mirror`：把资产下载地址中的 `https://github.com/` 替换为该前缀（加速代理填 `https://代理/https://github.com/`，自建镜像按 GitHub 路径布局），为空时直连；API 请求不走镜像；下载后必须校验 sha256。`update.enabled`（默认 `true`）为 `false` 时不检查 |
 | 检查失败 | 静默忽略，记录日志，不影响主功能 |
 
