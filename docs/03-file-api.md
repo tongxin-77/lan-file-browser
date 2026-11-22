@@ -152,16 +152,26 @@ flowchart LR
 
 ### 4.5 GET /api/thumb
 
-参数：`share`、`path`、`w`（取整到 160/320/640）；允许 `?t=`。返回 JPEG，`Cache-Control: private, max-age=86400`。
+参数：`share`、`path`、`w`、`ver`（可选）；允许 `?t=`。返回 JPEG。
+
+- `w` 向上取整到 160 / 320 / 640（缩略图）或 1280 / 1920 / 2560（预览图），超过 2560 按 2560；缺省 320。`w` 表示输出宽度上限：不放大（原图更小则按原尺寸输出），高度超过 `4w` 时按 `4w` 限高。预览图只对图片生效，视频最多 640（`w=1920` 的视频请求按 640 处理）。JPEG 质量：缩略图 80、预览图 85。
+- 方向：图片按 EXIF Orientation 转正后输出（系统缩略图本身已转正）。
+- 缓存版本 `ver=<mtime>_<size>`：取自 `/api/list` 条目的 `mtime`（毫秒）与 `size` 原样拼接，例如 `/api/thumb?share=s1&path=照片/a.jpg&w=320&ver=1732252800123_5436242&t=…`。
+  - `ver` 与文件当前 mtime/size 一致：`Cache-Control: private, max-age=31536000, immutable`（URL 不变则内容不变）。
+  - `ver` 不一致（列表过期）：`Cache-Control: private, no-cache`；不带 `ver`：`private, max-age=86400`（兼容旧 App）。
+- `ETag`：由真实路径、mtime、size、取整后的宽度与出图算法版本计算；请求带匹配的 `If-None-Match` 时直接 `304`，不生成图片（仍先做可见性与路径校验）。
 
 | 来源 | 生成方式 | `hasThumb` |
 | ---- | ---- | ---- |
-| 图片 jpg/png/gif/webp | Go 图像库（`image/*` + `golang.org/x/image/webp`）解码缩放；暂未按 EXIF 方向旋转（见 07 §3） | true |
+| 图片 jpg/png/gif/webp | 依次尝试：① `w=160` 且 JPEG 内嵌 EXIF 缩略图比例一致、尺寸够用时直接取用；② `w≤640` 时 Windows 系统缩略图（Shell `IShellItemImageFactory`，JPEG 只查系统缩略图缓存，其他格式允许系统生成）；③ JPEG 用 WIC 按 1/2、1/4、1/8 的 DCT 缩放解码；④ Go 图像库（`image/*` + `golang.org/x/image/webp`）解码。失败逐级回落 | true |
+| HEIC / HEIF | 系统缩略图（任意档位，允许系统生成） | 装有 WIC HEIF 解码器（“HEIF 图像扩展”）时 true；缺 HEVC 解码时生成失败返回 404 |
 | 视频 | ffmpeg 截取第 10 秒一帧，片长不足取第 0 秒（PATH 或配置中找到 ffmpeg 时） | 有 ffmpeg 才 true |
-| 其他（含 HEIC） | — | false，App 用占位封面 |
+| 其他（bmp 等） | — | false，App 用占位封面 |
 
-- 缓存：`%LOCALAPPDATA%\LanFileBrowser\cache\thumbs\<sha256(真实路径+mtime+size+w)>.jpg`；文件变更后键自然失效。缓存总量超上限（默认 1 GB）按访问时间淘汰暂未实现（见 07 §3）。
-- 生成并发上限 2（避免 ffmpeg 抢占 CPU）；`hasThumb` 表示「可生成」，不表示已缓存。
+- 路径安全：系统缩略图与 ffmpeg 只接收经 `fsx` 校验后、由已打开句柄取得的最终真实路径（`fsx.FinalPath`，不含链接与短名）；WIC 直接读已打开的句柄。
+- 缓存：`%LOCALAPPDATA%\LanFileBrowser\cache\thumbs\<sha256(版本+真实路径+mtime+size+w)>.jpg`；文件变更后键自然失效。总量上限 1 GB：写入使总量超限时同步淘汰，按最近访问时间（命中时刷新缓存文件 mtime，1 小时内不重复刷新）从旧到新删到 90% 以下；启动时统计一次并清理遗留临时文件。
+- 并发：图片生成上限 min(CPU 核数, 4)（至少 2），视频（ffmpeg）2；同键并发请求合并。`hasThumb` 表示「可生成」，不表示已缓存。
+- 预热：`/api/list` 返回后（非 304），后台为该目录从当前页起的图片（最多 200 个）生成 320 档缓存；单线程依次执行，有真实缩略图请求在等待生成时让路；新的列表请求替换旧队列；不影响列表响应。加密片库同样预热（缓存只在本机）。
 - 错误：`NOT_FOUND`（含不支持的类型）、`SHARE_OFFLINE`。
 
 ### 4.6 GET /api/next

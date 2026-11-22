@@ -94,8 +94,10 @@ func run(dataDir string, port int, updateAPI string, browser bool) error {
 		CacheDir: filepath.Join(dataDir, "cache", "apk"),
 		Settings: func() config.UpdateSettings { return cfgStore.Get().Update }})
 	org := organize.New(organize.Options{Config: cfgStore, DB: db, Activity: act})
+	thumbs := thumb.New(thumbDir, ffmpeg)
+	go thumbs.Prune() // 启动时统计缓存并按上限淘汰
 	srv := &api.Server{Config: cfgStore, Auth: svc, Version: version, Port: port, Store: db, Activity: act,
-		Thumbs: thumb.New(thumbDir, ffmpeg), Updates: updates, Organizer: org}
+		Thumbs: thumbs, Updates: updates, Organizer: org}
 	hs := api.NewHTTPServer(fmt.Sprintf(":%d", port), srv.Handler())
 
 	// SIGTERM：Windows 关闭控制台窗口、注销、关机（CTRL_CLOSE/LOGOFF/SHUTDOWN_EVENT）

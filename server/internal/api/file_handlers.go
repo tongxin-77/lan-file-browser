@@ -128,6 +128,7 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 	total := len(items)
 	start := min(offset, total)
+	s.prefetchThumbs(sh, rel, items[start:])
 	page := items[start:min(start+limit, total)]
 	writeJSON(w, map[string]any{"items": page, "total": total})
 }

@@ -44,6 +44,7 @@ func newVaultServer(t *testing.T) (*Server, *vclock) {
 	png.Encode(f, image.NewRGBA(image.Rect(0, 0, 4, 4)))
 	f.Close()
 	s.Thumbs = thumb.New(t.TempDir(), "")
+	t.Cleanup(s.Thumbs.WaitIdle) // 列表触发的预热须在临时目录删除前结束
 
 	cfg, err := config.Load(t.TempDir())
 	if err != nil {

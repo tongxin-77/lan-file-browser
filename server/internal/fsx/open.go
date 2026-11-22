@@ -151,6 +151,19 @@ func rootFinalPath(root *os.Root) (string, error) {
 	return strings.TrimSuffix(p, `\`), err // 盘符根形如 \?\D:\
 }
 
+// FinalPath 返回已打开文件（应经 Open/OpenFinal 校验）的真实最终路径并去掉 \\?\ 前缀，
+// 供需要路径的系统接口（如 Shell 缩略图）使用：不含链接与短名，与实际打开的文件一致。
+func FinalPath(f *os.File) (string, error) {
+	p, err := finalPath(f)
+	if err != nil {
+		return "", err
+	}
+	if rest, ok := strings.CutPrefix(p, `\\?\UNC\`); ok {
+		return `\\` + rest, nil
+	}
+	return strings.TrimPrefix(p, `\\?\`), nil
+}
+
 // finalPath 通过 GetFinalPathNameByHandleW 取打开句柄的真实长路径。
 func finalPath(f *os.File) (string, error) {
 	buf := make([]uint16, windows.MAX_PATH)

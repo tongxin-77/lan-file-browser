@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -20,10 +21,19 @@ import (
 )
 
 func TestWidth(t *testing.T) {
-	for in, want := range map[int]int{1: 160, 160: 160, 161: 320, 320: 320, 500: 640, 640: 640, 5000: 640} {
+	for in, want := range map[int]int{1: 160, 160: 160, 161: 320, 320: 320, 500: 640, 640: 640, 641: 1280, 1500: 1920, 1920: 1920, 2000: 2560, 5000: 2560} {
 		if got := Width(in); got != want {
 			t.Errorf("Width(%d) = %d, want %d", in, got, want)
 		}
+	}
+	// 预览图只对图片生效：视频最多 640
+	for name, want := range map[string]int{"a.jpg": 2560, "b.HEIC": 2560, "v.mkv": 640, "v.MP4": 640} {
+		if got := WidthFor(name, 3000); got != want {
+			t.Errorf("WidthFor(%s) = %d, want %d", name, got, want)
+		}
+	}
+	if WidthFor("v.mkv", 200) != 320 {
+		t.Error("视频小尺寸应照常取整")
 	}
 }
 
@@ -122,6 +132,7 @@ func TestDecodeConfigLimit(t *testing.T) {
 
 func TestUnsupportedAndNoFFmpeg(t *testing.T) {
 	s := New(t.TempDir(), "")
+	s.HEIF = false
 	for name, want := range map[string]bool{"a.JPG": true, "b.webp": true, "c.gif": true, "d.heic": false, "e.bmp": false, "f.mkv": false, "g.txt": false} {
 		if got := s.Can(name); got != want {
 			t.Errorf("Can(%s) = %v, want %v", name, got, want)
@@ -153,7 +164,7 @@ func TestFFmpegArgs(t *testing.T) {
 	}
 }
 
-// 同键并发请求合并且全部成功；并发生成数不超过 2。
+// 同键并发请求合并且全部成功；图片并发上限 min(CPU 核数, 4)（至少 2），视频 2。
 func TestConcurrentSameKey(t *testing.T) {
 	s := New(t.TempDir(), "")
 	data := pngBytes(t, 800, 600)
@@ -174,8 +185,8 @@ func TestConcurrentSameKey(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if cap(s.sem) != 2 {
-		t.Errorf("并发上限 %d, want 2", cap(s.sem))
+	if want := min(max(runtime.NumCPU(), 2), 4); cap(s.imgSem) != want || cap(s.vidSem) != 2 {
+		t.Errorf("并发上限 图片 %d 视频 %d, want %d / 2", cap(s.imgSem), cap(s.vidSem), want)
 	}
 	ents, _ := os.ReadDir(s.Dir)
 	if len(ents) != 1 {
